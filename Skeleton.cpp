@@ -1,5 +1,5 @@
 //=============================================================================================
-// Mintaprogram: ZÃ¶ld hÃ¡romszÃ¶g. Ervenyes 2019. osztol.
+// Mintaprogram: Zöld háromszög. Ervenyes 2018. osztol.
 //
 // A beadott program csak ebben a fajlban lehet, a fajl 1 byte-os ASCII karaktereket tartalmazhat, BOM kihuzando.
 // Tilos:
@@ -34,82 +34,16 @@
 #include "framework.h"
 
 
-template <typename T>
-struct SupportedVBOLayoutTypes {};
-template <>
-struct SupportedVBOLayoutTypes<float>
-{
-	static constexpr unsigned int type = GL_FLOAT;
-	static constexpr unsigned int normalized = GL_FALSE;
-};
-template <>
-struct SupportedVBOLayoutTypes<unsigned int>
-{
-	static constexpr unsigned int type = GL_UNSIGNED_INT;
-	static constexpr unsigned int normalized = GL_FALSE;
-};
-template <>
-struct SupportedVBOLayoutTypes<unsigned char>
-{
-	static constexpr unsigned int type = GL_UNSIGNED_BYTE;
-	static constexpr unsigned int normalized = GL_TRUE;
-};
-template <>
-struct SupportedVBOLayoutTypes<int>
-{
-	static constexpr unsigned int type = GL_INT;
-	static constexpr unsigned int normalized = GL_TRUE;
-};
-
-// Inspiralta: TODO: link ide
-template <typename T>
-class VertexBufferLayout
-{
-private:
-	struct VertexBufferElement
-	{
-		unsigned int count;
-		unsigned int size;
-	};
-
-public:
-	VertexBufferLayout() : m_Stride(0) {}
-	~VertexBufferLayout() = default;
-	
-	void UploadLayout() const
-	{
-		unsigned long offset = 0;
-		for (unsigned int i = 0; i < m_Elements.size(); ++i)
-		{
-			auto& element = m_Elements[i];
-			glEnableVertexAttribArray(i);
-			glVertexAttribPointer(i, element.count, SupportedVBOLayoutTypes<T>::type, SupportedVBOLayoutTypes<T>::normalized, m_Stride, (void*)offset);
-			offset += element.size;
-		}
-	}
-	
-	void Push(unsigned int count)
-	{
-		m_Elements.push_back({count, static_cast<unsigned int>(count * sizeof(T))});
-		m_Stride += sizeof(T) * count;
-	}
-
-private:
-	std::vector<VertexBufferElement> m_Elements;
-	unsigned int m_Stride;
-};
-
-
-// vertex shader in GLSL
+// vertex shader in GLSL: It is a Raw string (C++11) since it contains new line characters
 const char * const vertexSource = R"(
 	#version 330				// Shader 3.3
 	precision highp float;		// normal floats, makes no difference on desktop computers
 
 	uniform mat4 MVP;			// uniform variable, the Model-View-Projection transformation matrix
-	layout(location = 0) in vec2 vp;	// Varying input: vp = vertex position is expected in attrib array 0
+	layout(location = 0) in vec2 aPos;	// Varying input: vp = vertex position is expected in attrib array 0
 
 	void main() {
-		gl_Position = vec4(vp.x, vp.y, 0, 1) * MVP;		// transform vp from modeling space to normalized device space
+		gl_Position = vec4(aPos.xy, 0.0f, 1.0f) * MVP;		// transform vp from modeling space to normalized device space
 	}
 )";
 
@@ -117,71 +51,95 @@ const char * const vertexSource = R"(
 const char * const fragmentSource = R"(
 	#version 330			// Shader 3.3
 	precision highp float;	// normal floats, makes no difference on desktop computers
-	
-	uniform vec3 color;		// uniform variable, the color of the primitive
+
 	out vec4 outColor;		// computed color of the current pixel
 
 	void main() {
-		outColor = vec4(color, 1);	// computed color is the color of the primitive
+		outColor = vec4(1.0f, 0.0f, 0.0f, 1.0f);
 	}
 )";
 
-GPUProgram gpuProgram;
+
+
+GPUProgram gpuProgram; // vertex and fragment shaders
 unsigned int vao;
+unsigned int ebo;
+
 
 // Initialization, create an OpenGL context
 void onInitialization() {
+	
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	glEnable(GL_DEPTH_TEST);
+	
 	glViewport(0, 0, windowWidth, windowHeight);
-
 	
-	glGenVertexArrays(1, &vao);	// get 1 vao id
-	glBindVertexArray(vao);		// make it active
-
-	unsigned int vbo;		// vertex buffer object
-	glGenBuffers(1, &vbo);	// Generate 1 buffer
+	glGenVertexArrays(1, &vao);
+	glBindVertexArray(vao);
+	
+	float verticies[] = {
+			0.0f, 0.0f,
+			0.5f, 0.5f,
+			1.0f, 0.0f
+	};
+	
+	unsigned char indicies[] =  {
+			0, 1, 2
+	};
+	
+	unsigned int vbo;
+	glGenBuffers(1, &vbo);
 	glBindBuffer(GL_ARRAY_BUFFER, vbo);
-	// Geometry with 24 bytes (6 floats or 3 x 2 coordinates)
-	float vertices[] = { -0.8f, -0.8f, -0.6f, 1.0f, 0.8f, -0.2f };
-	glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(verticies), verticies, GL_STATIC_DRAW);
 	
-	VertexBufferLayout<float> layout;
-	layout.Push(2);
-	layout.UploadLayout();
+	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 2, 0);
+	glEnableVertexAttribArray(0);
+	
+	glGenBuffers(1, &ebo);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indicies), indicies, GL_STATIC_DRAW);
 
 	// create program for the GPU
 	gpuProgram.create(vertexSource, fragmentSource, "outColor");
+	
+	glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
 }
 
 // Window has become invalid: Redraw
-void onDisplay() {
-	glClearColor(0, 0, 0, 0);
-	glClear(GL_COLOR_BUFFER_BIT);
-
-	// Set color to (0, 1, 0) = green
+void onDisplay()
+{
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT); // clear frame buffer
+	
+	
+	mat4 MVPtransf = { 1, 0, 0, 0,    // MVP matrix,
+	                   0, 1, 0, 0,    // row-major!
+	                   0, 0, 1, 0,
+	                   0, 0, 0, 1 };
 	
 	gpuProgram.Use();
-	gpuProgram.setUniform(vec3(0.0f, 1.0f, 0.0f), "color");
-
-	mat4 MVPtransf = { 1, 0, 0, 0,
-					   0, 1, 0, 0,
-					   0, 0, 1, 0,
-					   0, 0, 0, 1 };
-
 	gpuProgram.setUniform(MVPtransf, "MVP");
 	
 	glBindVertexArray(vao);
-	glDrawArrays(GL_TRIANGLES, 0, 3);
-
-	glutSwapBuffers();
+	glDrawElements(GL_TRIANGLES, 3, GL_UNSIGNED_BYTE, 0);
+	
+	
+	glutSwapBuffers(); // exchange buffers for double buffering
 }
 
 // Key of ASCII code pressed
-void onKeyboard(unsigned char key, int pX, int pY) {
-	if (key == 'd') glutPostRedisplay();         // if d, invalidate display, i.e. redraw
+void onKeyboard(unsigned char key, int pX, int pY)
+{
 }
 
 // Key of ASCII code released
-void onKeyboardUp(unsigned char key, int pX, int pY) {
+void onKeyboardUp(unsigned char key, int pX, int pY)
+{
+	if (key == 'd')
+	{
+		glutPostRedisplay();
+		printf("Redisplay\n");
+	}
 }
 
 // Move mouse with key pressed
@@ -198,7 +156,7 @@ void onMouse(int button, int state, int pX, int pY) { // pX, pY are the pixel co
 	float cX = 2.0f * pX / windowWidth - 1;	// flip y axis
 	float cY = 1.0f - 2.0f * pY / windowHeight;
 
-	const char * buttonStat;
+	const char * buttonStat = nullptr;
 	switch (state) {
 	case GLUT_DOWN: buttonStat = "pressed"; break;
 	case GLUT_UP:   buttonStat = "released"; break;
@@ -214,5 +172,5 @@ void onMouse(int button, int state, int pX, int pY) { // pX, pY are the pixel co
 // Idle event indicating that some time elapsed: do animation here
 void onIdle() {
 	long time = glutGet(GLUT_ELAPSED_TIME); // elapsed time since the start of the program
+	glutPostRedisplay();
 }
-

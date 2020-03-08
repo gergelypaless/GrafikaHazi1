@@ -2,7 +2,7 @@
 // Collection of programs from lecture slides.
 // Framework for assignments. Valid from 2019.
 //
-// Do not change it if you want to submit a homework. 
+// Do not change it if you want to submit a homework.
 // In the homework, file operations other than printf are prohibited.
 //=============================================================================================
 #define _USE_MATH_DEFINES		// M_PI
@@ -10,7 +10,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <vector>
-#include <string> 
+#include <string>
 
 #if defined(__APPLE__)
 #include <GLUT/GLUT.h>
@@ -19,7 +19,7 @@
 #if defined(WIN32) || defined(_WIN32) || defined(__WIN32__)
 #include <windows.h>
 #endif
-#include <GL/glew.h>		// must be downloaded 
+#include <GL/glew.h>		// must be downloaded
 #include <GL/freeglut.h>	// must be downloaded unless you have an Apple
 #endif
 
@@ -35,7 +35,7 @@ struct vec2 {
 	vec2 operator*(float a) const { return vec2(x * a, y * a); }
 	vec2 operator/(float a) const { return vec2(x / a, y / a); }
 	vec2 operator+(const vec2& v) const { return vec2(x + v.x, y + v.y); }
-	vec2 operator-(const vec2& v) const { return vec2(x - v.x, y - v.y); }	
+	vec2 operator-(const vec2& v) const { return vec2(x - v.x, y - v.y); }
 	vec2 operator*(const vec2& v) const { return vec2(x * v.x, y * v.y); }
 	vec2 operator-() const { return vec2(-x, -y); }
 };
@@ -150,12 +150,12 @@ struct vec4 {
 	}
 };
 
-inline float dot(const vec4& v1, const vec4& v2) { 
+inline float dot(const vec4& v1, const vec4& v2) {
 	return (v1.x * v2.x + v1.y * v2.y + v1.z * v2.z + v1.w * v2.w);
 }
 
-inline vec4 operator*(float a, const vec4& v) { 
-	return vec4(v.x * a, v.y * a, v.z * a, v.w * a); 
+inline vec4 operator*(float a, const vec4& v) {
+	return vec4(v.x * a, v.y * a, v.z * a, v.w * a);
 }
 
 //---------------------------
@@ -283,7 +283,7 @@ public:
 
 	void create(const char * const vertexShaderSource,
 		        const char * const fragmentShaderSource, const char * const fragmentShaderOutputName,
-		        const char * const geometryShaderSource = nullptr) 
+		        const char * const geometryShaderSource = nullptr)
 	{
 		// Create vertex shader from string
 		unsigned int vertexShader = glCreateShader(GL_VERTEX_SHADER);
