@@ -1,2 +1,1 @@
-# Grafika Sablon Project
-Támogatott Operációs rendszerek: Windows, Linux
+# Grafika első házi: Szíriuszi geometria
