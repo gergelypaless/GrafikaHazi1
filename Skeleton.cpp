@@ -33,112 +33,281 @@
 //=============================================================================================
 #include "framework.h"
 
+// --------------------------------------------------------------------
+// Beadás el?tt kivenni:
+// --------------------------------------------------------------------
+#define ASSERT(x) if (!(x)) __builtin_trap() // csak GCC-vel tesztelve
+#define GLCall(x) GLClearError(); x; ASSERT(GLLogCall(__FUNCTION__, __FILE__, __LINE__))
 
-// vertex shader in GLSL: It is a Raw string (C++11) since it contains new line characters
-const char * const vertexSource = R"(
+static void GLClearError()
+{
+	while (glGetError() != GL_NO_ERROR) ;
+}
+static bool GLLogCall(const char* function, const char* file, unsigned int line)
+{
+	if (unsigned int error = glGetError())
+	{
+		printf("[OpenGL Error] (%d): %s %s:%d\n", error, function, file, line);
+		return false;
+	}
+	return true;
+}
+// --------------------------------------------------------------------
+
+
+template <typename T>
+struct SupportedVBOLayoutTypes {};
+template <>
+struct SupportedVBOLayoutTypes<float>
+{
+	static constexpr unsigned int glType = GL_FLOAT;
+	static constexpr unsigned int normalized = GL_FALSE;
+};
+
+class LayoutElementBase
+{
+public:
+	LayoutElementBase(unsigned int count, unsigned int type) : m_Count(count), m_Type(type) { }
+	virtual ~LayoutElementBase() = default;
+	unsigned int GetCount() const { return m_Count; }
+	unsigned int GetType() const { return m_Type; }
+	virtual unsigned int GetNormalized() const = 0;
+	virtual unsigned int GetSize() const = 0;
+private:
+	unsigned int m_Count;
+	unsigned int m_Type;
+};
+
+template<typename T>
+struct LayoutElement : public LayoutElementBase
+{
+	explicit LayoutElement(unsigned int count) : LayoutElementBase(count, SupportedVBOLayoutTypes<T>::glType) {	}
+	unsigned int GetSize() const override { return GetCount() * sizeof(T); }
+	unsigned int GetNormalized() const override { return SupportedVBOLayoutTypes<T>::normalized; }
+};
+
+void UploadVertexBufferLayout(const std::vector<LayoutElementBase*>& layout)
+{
+	if (layout.empty())
+		throw "empty vector of counts";
+	
+	unsigned int stride = 0;
+	
+	// determining stride value
+	for (const auto& element : layout)
+		stride += element->GetSize();
+	
+	unsigned long offset = 0;
+	for (unsigned int i = 0; i < layout.size(); ++i)
+	{
+		glEnableVertexAttribArray(i);
+		glVertexAttribPointer(i, layout[i]->GetCount(), layout[i]->GetType(), layout[i]->GetNormalized(), stride, (void*)offset);
+		offset += layout[i]->GetSize();
+	}
+	
+	for (const auto& element : layout)
+		delete element;
+}
+
+
+class Circle
+{
+public:
+	Circle(float x, float y, float radius, unsigned int numOfSides, bool isHollow = false) : m_VAO(0), isHollow(isHollow)
+	{
+		/* A kor pontjainak meghatarozasat ezek a forrasok segitsegevel hataroztam meg:
+		 *      https://www.youtube.com/watch?v=YDCSKlFqpaU
+		 *      https://www.youtube.com/watch?v=ccvebHuZOHM
+		 */
+		
+		numOfVertices = numOfSides + 2;
+		
+		float circleVerticesX[numOfVertices];
+		float circleVerticesY[numOfVertices];
+		
+		if (!isHollow)
+		{
+			circleVerticesX[0] = x;
+			circleVerticesY[0] = y;
+		}
+		
+		for (int i = isHollow ? 0 : 1; i < numOfVertices; ++i)
+		{
+			circleVerticesX[i] = x + (radius * cos(i * 2.0f * M_PI / numOfSides));
+			circleVerticesY[i] = y + (radius * sin(i * 2.0f * M_PI / numOfSides));
+		}
+		
+		allCircleVertices = new float[numOfVertices * 2];
+		
+		for (int i = 0; i < numOfVertices; ++i)
+		{
+			allCircleVertices[i * 2 + 0] = circleVerticesX[i];
+			allCircleVertices[i * 2 + 1] = circleVerticesY[i];
+		}
+		
+		glGenVertexArrays(1, &m_VAO);	// get 1 vao id
+		glBindVertexArray(m_VAO);		// make it active
+		
+		unsigned int vbo;		// vertex buffer object
+		glGenBuffers(1, &vbo);	// Generate 1 buffer
+		glBindBuffer(GL_ARRAY_BUFFER, vbo);
+		
+		glBufferData(GL_ARRAY_BUFFER, sizeof(float) * numOfVertices * 2, allCircleVertices, GL_STATIC_DRAW);
+		
+		UploadVertexBufferLayout({
+			new LayoutElement<float>(2),
+		});
+	}
+	
+	virtual ~Circle()
+	{
+		delete[] allCircleVertices;
+		glDeleteVertexArrays(1, &m_VAO);
+	}
+	
+	void Draw()
+	{
+		glBindVertexArray(m_VAO);
+		glDrawArrays(isHollow ? GL_LINE_STRIP : GL_TRIANGLE_FAN, 0, numOfVertices);
+	}
+	
+private:
+	float* allCircleVertices;
+	
+	unsigned int m_VAO;
+	unsigned int numOfVertices;
+	bool isHollow;
+	
+};
+
+
+void CreateCircle();
+
+const char * const circleVertexShader = R"(
 	#version 330				// Shader 3.3
 	precision highp float;		// normal floats, makes no difference on desktop computers
 
-	uniform mat4 MVP;			// uniform variable, the Model-View-Projection transformation matrix
 	layout(location = 0) in vec2 aPos;	// Varying input: vp = vertex position is expected in attrib array 0
+
+	uniform mat4 MVP;			// uniform variable, the Model-View-Projection transformation matrix
 
 	void main() {
 		gl_Position = vec4(aPos.xy, 0.0f, 1.0f) * MVP;		// transform vp from modeling space to normalized device space
 	}
 )";
 
-// fragment shader in GLSL
-const char * const fragmentSource = R"(
+const char * const circleFragmentShader = R"(
 	#version 330			// Shader 3.3
 	precision highp float;	// normal floats, makes no difference on desktop computers
-
+	
 	out vec4 outColor;		// computed color of the current pixel
 
+	uniform vec3 color;		// uniform variable, the color of the primitive
+
 	void main() {
-		outColor = vec4(1.0f, 0.0f, 0.0f, 1.0f);
+		outColor = vec4(color.xyz, 1.0f);	// computed color is the color of the primitive
 	}
 )";
 
+const char * const triangleVertexShader = R"(
+	#version 330				// Shader 3.3
+	precision highp float;		// normal floats, makes no difference on desktop computers
 
+	layout(location = 0) in vec2 aPos;	// Varying input: vp = vertex position is expected in attrib array 0
 
-GPUProgram gpuProgram; // vertex and fragment shaders
-unsigned int vao;
-unsigned int ebo;
+	uniform mat4 MVP;			// uniform variable, the Model-View-Projection transformation matrix
 
+	void main() {
+		gl_Position = vec4(aPos.xy, 0.1f, 1.0f) * MVP;		// transform vp from modeling space to normalized device space
+	}
+)";
 
-// Initialization, create an OpenGL context
-void onInitialization() {
+const char * const triangleFragmentShader = R"(
+	#version 330			// Shader 3.3
+	precision highp float;	// normal floats, makes no difference on desktop computers
 	
-	glEnable(GL_BLEND);
-	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-	glEnable(GL_DEPTH_TEST);
-	
+	out vec4 outColor;		// computed color of the current pixel
+
+	uniform vec3 color;		// uniform variable, the color of the primitive
+
+	void main() {
+		outColor = vec4(color.xyz, 1.0f);	// computed color is the color of the primitive
+	}
+)";
+
+GPUProgram identityCircleShaderProgram;
+GPUProgram triangleShaderProgram;
+Circle* identityCircle;
+std::vector<Circle*> circles;
+
+
+unsigned int triangleVAO;
+
+
+std::vector<vec2> points;
+
+
+void onInitialization()
+{
 	glViewport(0, 0, windowWidth, windowHeight);
 	
-	glGenVertexArrays(1, &vao);
-	glBindVertexArray(vao);
+	//glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 	
-	float verticies[] = {
-			0.0f, 0.0f,
-			0.5f, 0.5f,
-			1.0f, 0.0f
-	};
+	// identitty circle
+	identityCircle = new Circle(0, 0, 1.0f, 50, false);
+	identityCircleShaderProgram.create(circleVertexShader, circleFragmentShader, "outColor");
+	identityCircleShaderProgram.Use();
 	
-	unsigned char indicies[] =  {
-			0, 1, 2
-	};
 	
-	unsigned int vbo;
-	glGenBuffers(1, &vbo);
-	glBindBuffer(GL_ARRAY_BUFFER, vbo);
-	glBufferData(GL_ARRAY_BUFFER, sizeof(verticies), verticies, GL_STATIC_DRAW);
+	triangleShaderProgram.create(triangleVertexShader, triangleFragmentShader, "outColor");
 	
-	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 2, 0);
-	glEnableVertexAttribArray(0);
+	circles.reserve(3);
 	
-	glGenBuffers(1, &ebo);
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indicies), indicies, GL_STATIC_DRAW);
-
-	// create program for the GPU
-	gpuProgram.create(vertexSource, fragmentSource, "outColor");
-	
-	glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
+	//glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
+	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 }
 
 // Window has become invalid: Redraw
 void onDisplay()
 {
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT); // clear frame buffer
+	glClear(GL_COLOR_BUFFER_BIT); // clear frame buffer
+
+	// Set color to (0, 1, 0) = green
+	//gpuProgram.setUniform(vec3(0.0f, 1.0f, 0.0f), "color");
+
+	mat4 MVP = { 1, 0, 0, 0,    // MVP matrix,
+		                      0, 1, 0, 0,    // row-major!
+		                      0, 0, 1, 0,
+		                      0, 0, 0, 1 };
+
 	
+	identityCircleShaderProgram.Use();
+	identityCircleShaderProgram.setUniform(MVP, "MVP");
+	identityCircleShaderProgram.setUniform(vec3(0.18f, 0.18f, 0.18f), "color");
+	identityCircle->Draw();
 	
-	mat4 MVPtransf = { 1, 0, 0, 0,    // MVP matrix,
-	                   0, 1, 0, 0,    // row-major!
-	                   0, 0, 1, 0,
-	                   0, 0, 0, 1 };
+	for (auto& circle : circles)
+	{
+		triangleShaderProgram.Use();
+		triangleShaderProgram.setUniform(MVP, "MVP");
+		triangleShaderProgram.setUniform(vec3(0.6f, 0.5f, 0.5f), "color");
+		circle->Draw();
+	}
 	
-	gpuProgram.Use();
-	gpuProgram.setUniform(MVPtransf, "MVP");
-	
-	glBindVertexArray(vao);
-	glDrawElements(GL_TRIANGLES, 3, GL_UNSIGNED_BYTE, 0);
-	
-	
-	glutSwapBuffers(); // exchange buffers for double buffering
+	glutSwapBuffers();
 }
 
 // Key of ASCII code pressed
-void onKeyboard(unsigned char key, int pX, int pY)
-{
+void onKeyboard(unsigned char key, int pX, int pY) {
+
 }
 
 // Key of ASCII code released
-void onKeyboardUp(unsigned char key, int pX, int pY)
-{
-	if (key == 'd')
+void onKeyboardUp(unsigned char key, int pX, int pY) {
+	if (key == 27) // escape
 	{
-		glutPostRedisplay();
-		printf("Redisplay\n");
+		delete identityCircle;
+		exit(0);
 	}
 }
 
@@ -147,7 +316,21 @@ void onMouseMotion(int pX, int pY) {	// pX, pY are the pixel coordinates of the 
 	// Convert to normalized device space
 	float cX = 2.0f * pX / windowWidth - 1;	// flip y axis
 	float cY = 1.0f - 2.0f * pY / windowHeight;
-	printf("Mouse moved to (%3.2f, %3.2f)\n", cX, cY);
+}
+
+void CreateCircle(vec2 p1, vec2 p2)
+{
+	float x1 = p1.x;
+	float y1 = p1.y;
+	float x2 = p2.x;
+	float y2 = p2.y;
+	vec2 c;
+	c.x = (x1*x1 + y1*y1 + 1 - 2*y1*( (x1*x1*x2 + x2*y1*y1 - x1 + x2 - x1*x2*x2 - x1*y2*y2) / (2*x2*y1 - 2*x1*y2) )) / (2*x1);
+	c.y = (x1*x1*x2 + x2*y1*y1 - x1 + x2 - x1*x2*x2 - x1*y2*y2) / (2*x2*y1 - 2*x1*y2);
+	float r = length(p1 - c);
+	printf("Kozeppont: (%f, %f), r = %f\n", c.x, c.y, r);
+	
+	circles.push_back(new Circle(c.x, c.y, r, 100, true));
 }
 
 // Mouse click event
@@ -167,10 +350,35 @@ void onMouse(int button, int state, int pX, int pY) { // pX, pY are the pixel co
 	case GLUT_MIDDLE_BUTTON: printf("Middle button %s at (%3.2f, %3.2f)\n", buttonStat, cX, cY); break;
 	case GLUT_RIGHT_BUTTON:  printf("Right button %s at (%3.2f, %3.2f)\n", buttonStat, cX, cY);  break;
 	}
+	
+	// TODO: check for cX and cY are offside?
+	if (state == GLUT_UP && button == GLUT_LEFT_BUTTON)
+	{
+		points.push_back(vec2{cX, cY});
+		
+		if (points.size() == 3)
+		{
+			CreateCircle(vec2(points[0].x, points[0].y), vec2(points[1].x, points[1].y));
+			CreateCircle(vec2(points[1].x, points[1].y), vec2(points[2].x, points[2].y));
+			CreateCircle(vec2(points[2].x, points[2].y), vec2(points[0].x, points[0].y));
+			
+			points.clear();
+		}
+		else
+		{
+			for (auto& circle : circles)
+			{
+				delete circle;
+			}
+			circles.clear();
+		}
+	}
 }
 
-// Idle event indicating that some time elapsed: do animation here
-void onIdle() {
+
+
+void onIdle()
+{
 	long time = glutGet(GLUT_ELAPSED_TIME); // elapsed time since the start of the program
 	glutPostRedisplay();
 }

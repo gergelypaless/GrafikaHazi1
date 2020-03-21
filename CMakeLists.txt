@@ -1,7 +1,20 @@
 cmake_minimum_required(VERSION 3.7)
-project(GrafTemplateProject)
+project(GrafikaHazi1)
 
 set(CMAKE_CXX_STANDARD 11)
+
+
+if(NOT CMAKE_BUILD_TYPE)
+	set(CMAKE_BUILD_TYPE Release)
+endif()
+
+# Ha szeretnél több warningot
+#set(CMAKE_CXX_FLAGS "-Wall -Wextra")
+
+# optimizing options
+set(CMAKE_CXX_FLAGS_DEBUG "-g")
+set(CMAKE_CXX_FLAGS_RELEASE "-O3")
+
 
 set(CMAKE_BINARY_DIR ${CMAKE_SOURCE_DIR}/bin)
 set(EXECUTABLE_OUTPUT_PATH ${CMAKE_BINARY_DIR})
