@@ -34,7 +34,7 @@
 #include "framework.h"
 
 // --------------------------------------------------------------------
-// Beadás el?tt kivenni:
+// Beadás elott kivenni:
 // --------------------------------------------------------------------
 #define ASSERT(x) if (!(x)) __builtin_trap() // csak GCC-vel tesztelve
 #define GLCall(x) GLClearError(); x; ASSERT(GLLogCall(__FUNCTION__, __FILE__, __LINE__))
@@ -109,6 +109,14 @@ void UploadVertexBufferLayout(const std::vector<LayoutElementBase*>& layout)
 		delete element;
 }
 
+float degrees(float radians)
+{
+	return radians * 180.0f / M_PI;
+}
+float radians(float degrees)
+{
+	return degrees * M_PI / 180.0f;
+}
 
 class Circle
 {
@@ -120,7 +128,7 @@ public:
 		 *      https://www.youtube.com/watch?v=ccvebHuZOHM
 		 */
 		
-		numOfVertices = numOfSides + 2;
+		numOfVertices = numOfSides + 1 + (isHollow ? 0 : 1);
 		
 		float circleVerticesX[numOfVertices];
 		float circleVerticesY[numOfVertices];
@@ -168,7 +176,7 @@ public:
 	void Draw()
 	{
 		glBindVertexArray(m_VAO);
-		glDrawArrays(isHollow ? GL_LINE_STRIP : GL_TRIANGLE_FAN, 0, numOfVertices);
+		glDrawArrays(isHollow ? GL_LINE_LOOP : GL_TRIANGLE_FAN, 0, numOfVertices); // GL_LINE_STRIP ??
 	}
 	
 private:
@@ -180,8 +188,100 @@ private:
 	
 };
 
+struct Curve
+{
+	float fi1;
+	float fi2;
+	float centerX;
+	float centerY;
+	float radius;
+};
 
-void CreateCircle();
+bool equals(float f1, float f2)
+{
+	return abs(f1 - f2) < 0.01f;
+}
+
+class Triangle
+{
+public:
+	Triangle(std::vector<Curve>& curves, float step)
+	{
+		for (auto& c : curves)
+		{
+			float _step = step * 1 / c.radius;
+			
+			if (c.fi1 < 0 && c.fi2 > 0 && c.fi2 > M_PI / 2.0f)
+			{
+				c.fi1 += 2*M_PI;
+			}
+			else if (c.fi1 < 0 && c.fi2 > 0 && c.fi2 <= M_PI / 2.0f)
+			{
+				c.fi1 += 2*M_PI;
+				c.fi2 += 2*M_PI;
+			}
+			if (c.fi2 < 0 && c.fi1 > 0 && c.fi1 > M_PI / 2.0f)
+			{
+				c.fi2 += 2*M_PI;
+			}
+			else if (c.fi2 < 0 && c.fi1 > 0 && c.fi1 <= M_PI / 2.0f)
+			{
+				c.fi1 += 2*M_PI;
+				c.fi2 += 2*M_PI;
+			}
+			
+			if (c.fi1 > c.fi2)
+			{
+				float t = c.fi1;
+				while (t > c.fi2)
+				{
+					allCircleVertices.emplace_back(c.centerX + (c.radius * cos(t)), c.centerY + (c.radius * sin(t)));
+					t -= _step;
+				}
+			}
+			else // if (c.fi1 < c.fi2)
+			{
+				float t = c.fi1;
+				while (t < c.fi2)
+				{
+					allCircleVertices.emplace_back(c.centerX + (c.radius * cos(t)), c.centerY + (c.radius * sin(t)));
+					t += _step;
+				}
+			}
+			
+		}
+		
+		glGenVertexArrays(1, &m_VAO);
+		glBindVertexArray(m_VAO);
+		
+		unsigned int vbo;
+		glGenBuffers(1, &vbo);
+		glBindBuffer(GL_ARRAY_BUFFER, vbo);
+		glBufferData(GL_ARRAY_BUFFER, sizeof(vec2) * allCircleVertices.size(), allCircleVertices.data(), GL_STATIC_DRAW);
+		
+		UploadVertexBufferLayout({
+			new LayoutElement<float>(2)
+		});
+	}
+	
+	virtual ~Triangle()
+	{
+		glDeleteVertexArrays(1, &m_VAO);
+	}
+	
+	void Draw()
+	{
+		glBindVertexArray(m_VAO);
+		glDrawArrays(GL_LINE_LOOP, 0, allCircleVertices.size()); // GL_LINE_STRIP ??
+	}
+
+
+private:
+	std::vector<vec2> allCircleVertices;
+	
+	unsigned int m_VAO = 0;
+
+};
 
 const char * const circleVertexShader = R"(
 	#version 330				// Shader 3.3
@@ -238,13 +338,11 @@ const char * const triangleFragmentShader = R"(
 GPUProgram identityCircleShaderProgram;
 GPUProgram triangleShaderProgram;
 Circle* identityCircle;
-std::vector<Circle*> circles;
 
-
-unsigned int triangleVAO;
-
-
+Triangle* triangle;
 std::vector<vec2> points;
+
+
 
 
 void onInitialization()
@@ -261,19 +359,16 @@ void onInitialization()
 	
 	triangleShaderProgram.create(triangleVertexShader, triangleFragmentShader, "outColor");
 	
-	circles.reserve(3);
-	
 	//glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
 	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+	
+	printf("atan2: %f\n", atan2(-0.1f, 1.0f));
 }
 
 // Window has become invalid: Redraw
 void onDisplay()
 {
 	glClear(GL_COLOR_BUFFER_BIT); // clear frame buffer
-
-	// Set color to (0, 1, 0) = green
-	//gpuProgram.setUniform(vec3(0.0f, 1.0f, 0.0f), "color");
 
 	mat4 MVP = { 1, 0, 0, 0,    // MVP matrix,
 		                      0, 1, 0, 0,    // row-major!
@@ -286,12 +381,12 @@ void onDisplay()
 	identityCircleShaderProgram.setUniform(vec3(0.18f, 0.18f, 0.18f), "color");
 	identityCircle->Draw();
 	
-	for (auto& circle : circles)
+	if (triangle != nullptr)
 	{
 		triangleShaderProgram.Use();
 		triangleShaderProgram.setUniform(MVP, "MVP");
-		triangleShaderProgram.setUniform(vec3(0.6f, 0.5f, 0.5f), "color");
-		circle->Draw();
+		triangleShaderProgram.setUniform(vec3(1.0f, 1.0f, 1.0f), "color");
+		triangle->Draw();
 	}
 	
 	glutSwapBuffers();
@@ -307,6 +402,7 @@ void onKeyboardUp(unsigned char key, int pX, int pY) {
 	if (key == 27) // escape
 	{
 		delete identityCircle;
+		delete triangle;
 		exit(0);
 	}
 }
@@ -318,7 +414,7 @@ void onMouseMotion(int pX, int pY) {	// pX, pY are the pixel coordinates of the 
 	float cY = 1.0f - 2.0f * pY / windowHeight;
 }
 
-void CreateCircle(vec2 p1, vec2 p2)
+Curve CreateCurve(vec2 p1, vec2 p2)
 {
 	float x1 = p1.x;
 	float y1 = p1.y;
@@ -330,7 +426,7 @@ void CreateCircle(vec2 p1, vec2 p2)
 	float r = length(p1 - c);
 	printf("Kozeppont: (%f, %f), r = %f\n", c.x, c.y, r);
 	
-	circles.push_back(new Circle(c.x, c.y, r, 100, true));
+	return Curve{atan2(y1 - c.y, x1 - c.x), atan2(y2 - c.y, x2 - c.x), c.x, c.y, r};
 }
 
 // Mouse click event
@@ -354,23 +450,24 @@ void onMouse(int button, int state, int pX, int pY) { // pX, pY are the pixel co
 	// TODO: check for cX and cY are offside?
 	if (state == GLUT_UP && button == GLUT_LEFT_BUTTON)
 	{
-		points.push_back(vec2{cX, cY});
+		points.emplace_back(cX, cY);
 		
 		if (points.size() == 3)
 		{
-			CreateCircle(vec2(points[0].x, points[0].y), vec2(points[1].x, points[1].y));
-			CreateCircle(vec2(points[1].x, points[1].y), vec2(points[2].x, points[2].y));
-			CreateCircle(vec2(points[2].x, points[2].y), vec2(points[0].x, points[0].y));
+			std::vector<Curve> curves;
+			
+			curves.push_back(CreateCurve(points[0], points[1]));
+			curves.push_back(CreateCurve(points[1], points[2]));
+			curves.push_back(CreateCurve(points[2], points[0]));
+			
+			triangle = new Triangle(curves, 0.01f);
 			
 			points.clear();
 		}
 		else
 		{
-			for (auto& circle : circles)
-			{
-				delete circle;
-			}
-			circles.clear();
+			delete triangle;
+			triangle = nullptr;
 		}
 	}
 }
