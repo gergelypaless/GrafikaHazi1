@@ -118,6 +118,7 @@ float radians(float degrees)
 	return degrees * M_PI / 180.0f;
 }
 
+// TODO: refactor
 class Circle
 {
 public:
@@ -188,7 +189,7 @@ private:
 	
 };
 
-struct Curve
+struct CurveData
 {
 	float fi1;
 	float fi2;
@@ -197,58 +198,20 @@ struct Curve
 	float radius;
 };
 
-bool equals(float f1, float f2)
-{
-	return abs(f1 - f2) < 0.01f;
-}
-
-class Triangle
+class SiriusTriangle
 {
 public:
-	Triangle(std::vector<Curve>& curves, float step)
+	SiriusTriangle(std::vector<CurveData>& curves, float step) : m_VAO(0)
 	{
-		for (auto& c : curves)
+		for (auto& curve : curves)
 		{
-			float _step = step * 1 / c.radius;
+			float _step = step / curve.radius;
 			
-			if (c.fi1 < 0 && c.fi2 > 0 && c.fi2 > M_PI / 2.0f)
-			{
-				c.fi1 += 2*M_PI;
-			}
-			else if (c.fi1 < 0 && c.fi2 > 0 && c.fi2 <= M_PI / 2.0f)
-			{
-				c.fi1 += 2*M_PI;
-				c.fi2 += 2*M_PI;
-			}
-			if (c.fi2 < 0 && c.fi1 > 0 && c.fi1 > M_PI / 2.0f)
-			{
-				c.fi2 += 2*M_PI;
-			}
-			else if (c.fi2 < 0 && c.fi1 > 0 && c.fi1 <= M_PI / 2.0f)
-			{
-				c.fi1 += 2*M_PI;
-				c.fi2 += 2*M_PI;
-			}
-			
-			if (c.fi1 > c.fi2)
-			{
-				float t = c.fi1;
-				while (t > c.fi2)
-				{
-					allCircleVertices.emplace_back(c.centerX + (c.radius * cos(t)), c.centerY + (c.radius * sin(t)));
-					t -= _step;
-				}
-			}
+			ModifyAngles(curve);
+			if (curve.fi1 > curve.fi2)
+				AddPointsClockvise(curve, _step);
 			else // if (c.fi1 < c.fi2)
-			{
-				float t = c.fi1;
-				while (t < c.fi2)
-				{
-					allCircleVertices.emplace_back(c.centerX + (c.radius * cos(t)), c.centerY + (c.radius * sin(t)));
-					t += _step;
-				}
-			}
-			
+				AddPointsAntiClockvise(curve, _step);
 		}
 		
 		glGenVertexArrays(1, &m_VAO);
@@ -257,14 +220,14 @@ public:
 		unsigned int vbo;
 		glGenBuffers(1, &vbo);
 		glBindBuffer(GL_ARRAY_BUFFER, vbo);
-		glBufferData(GL_ARRAY_BUFFER, sizeof(vec2) * allCircleVertices.size(), allCircleVertices.data(), GL_STATIC_DRAW);
+		glBufferData(GL_ARRAY_BUFFER, sizeof(vec2) * allVertices.size(), allVertices.data(), GL_STATIC_DRAW);
 		
 		UploadVertexBufferLayout({
 			new LayoutElement<float>(2)
 		});
 	}
 	
-	virtual ~Triangle()
+	virtual ~SiriusTriangle()
 	{
 		glDeleteVertexArrays(1, &m_VAO);
 	}
@@ -272,15 +235,55 @@ public:
 	void Draw()
 	{
 		glBindVertexArray(m_VAO);
-		glDrawArrays(GL_LINE_LOOP, 0, allCircleVertices.size()); // GL_LINE_STRIP ??
+		glDrawArrays(GL_LINE_LOOP, 0, allVertices.size()); // GL_LINE_STRIP ??
 	}
-
-
-private:
-	std::vector<vec2> allCircleVertices;
 	
-	unsigned int m_VAO = 0;
-
+private:
+	std::vector<vec2> allVertices;
+	unsigned int m_VAO;
+	
+private:
+	void AddPointsClockvise(CurveData& curve, float step)
+	{
+		float t = curve.fi1;
+		while (t > curve.fi2)
+		{
+			allVertices.emplace_back(curve.centerX + (curve.radius * cos(t)), curve.centerY + (curve.radius * sin(t)));
+			t -= step;
+		}
+	}
+	
+	void AddPointsAntiClockvise(CurveData& curve, float step)
+	{
+		float t = curve.fi1;
+		while (t < curve.fi2)
+		{
+			allVertices.emplace_back(curve.centerX + (curve.radius * cos(t)), curve.centerY + (curve.radius * sin(t)));
+			t += step;
+		}
+	}
+	
+	static void ModifyAngles(CurveData& c)
+	{
+		if (c.fi1 < 0 && c.fi2 > 0 && c.fi2 > M_PI / 2.0f)
+		{
+			c.fi1 += 2*M_PI;
+		}
+		else if (c.fi1 < 0 && c.fi2 > 0 && c.fi2 <= M_PI / 2.0f)
+		{
+			c.fi1 += 2*M_PI;
+			c.fi2 += 2*M_PI;
+		}
+		if (c.fi2 < 0 && c.fi1 > 0 && c.fi1 > M_PI / 2.0f)
+		{
+			c.fi2 += 2*M_PI;
+		}
+		else if (c.fi2 < 0 && c.fi1 > 0 && c.fi1 <= M_PI / 2.0f)
+		{
+			c.fi1 += 2*M_PI;
+			c.fi2 += 2*M_PI;
+		}
+	}
 };
 
 const char * const circleVertexShader = R"(
@@ -339,11 +342,8 @@ GPUProgram identityCircleShaderProgram;
 GPUProgram triangleShaderProgram;
 Circle* identityCircle;
 
-Triangle* triangle;
-std::vector<vec2> points;
-
-
-
+SiriusTriangle* triangle;
+std::vector<vec2> clicks;
 
 void onInitialization()
 {
@@ -356,13 +356,10 @@ void onInitialization()
 	identityCircleShaderProgram.create(circleVertexShader, circleFragmentShader, "outColor");
 	identityCircleShaderProgram.Use();
 	
-	
 	triangleShaderProgram.create(triangleVertexShader, triangleFragmentShader, "outColor");
 	
 	//glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
 	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-	
-	printf("atan2: %f\n", atan2(-0.1f, 1.0f));
 }
 
 // Window has become invalid: Redraw
@@ -374,7 +371,6 @@ void onDisplay()
 		                      0, 1, 0, 0,    // row-major!
 		                      0, 0, 1, 0,
 		                      0, 0, 0, 1 };
-
 	
 	identityCircleShaderProgram.Use();
 	identityCircleShaderProgram.setUniform(MVP, "MVP");
@@ -414,7 +410,7 @@ void onMouseMotion(int pX, int pY) {	// pX, pY are the pixel coordinates of the 
 	float cY = 1.0f - 2.0f * pY / windowHeight;
 }
 
-Curve CreateCurve(vec2 p1, vec2 p2)
+CurveData CreateCurve(vec2 p1, vec2 p2)
 {
 	float x1 = p1.x;
 	float y1 = p1.y;
@@ -424,9 +420,7 @@ Curve CreateCurve(vec2 p1, vec2 p2)
 	c.x = (x1*x1 + y1*y1 + 1 - 2*y1*( (x1*x1*x2 + x2*y1*y1 - x1 + x2 - x1*x2*x2 - x1*y2*y2) / (2*x2*y1 - 2*x1*y2) )) / (2*x1);
 	c.y = (x1*x1*x2 + x2*y1*y1 - x1 + x2 - x1*x2*x2 - x1*y2*y2) / (2*x2*y1 - 2*x1*y2);
 	float r = length(p1 - c);
-	printf("Kozeppont: (%f, %f), r = %f\n", c.x, c.y, r);
-	
-	return Curve{atan2(y1 - c.y, x1 - c.x), atan2(y2 - c.y, x2 - c.x), c.x, c.y, r};
+	return CurveData{atan2(y1 - c.y, x1 - c.x), atan2(y2 - c.y, x2 - c.x), c.x, c.y, r};
 }
 
 // Mouse click event
@@ -450,19 +444,19 @@ void onMouse(int button, int state, int pX, int pY) { // pX, pY are the pixel co
 	// TODO: check for cX and cY are offside?
 	if (state == GLUT_UP && button == GLUT_LEFT_BUTTON)
 	{
-		points.emplace_back(cX, cY);
+		clicks.emplace_back(cX, cY);
 		
-		if (points.size() == 3)
+		if (clicks.size() == 3)
 		{
-			std::vector<Curve> curves;
+			std::vector<CurveData> curves;
 			
-			curves.push_back(CreateCurve(points[0], points[1]));
-			curves.push_back(CreateCurve(points[1], points[2]));
-			curves.push_back(CreateCurve(points[2], points[0]));
+			curves.push_back(CreateCurve(clicks[0], clicks[1]));
+			curves.push_back(CreateCurve(clicks[1], clicks[2]));
+			curves.push_back(CreateCurve(clicks[2], clicks[0]));
+
+			triangle = new SiriusTriangle(curves, 0.01f);
 			
-			triangle = new Triangle(curves, 0.01f);
-			
-			points.clear();
+			clicks.clear();
 		}
 		else
 		{
