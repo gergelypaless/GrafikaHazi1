@@ -189,30 +189,122 @@ private:
 	
 };
 
-struct CurveData
+class Curve
 {
+public:
+	static Curve Create(vec2 p1, vec2 p2)
+	{
+		float x1 = p1.x;
+		float y1 = p1.y;
+		float x2 = p2.x;
+		float y2 = p2.y;
+		vec2 c;
+		c.x = (y1 + x2*x2*y1 + y1*y2*y2 - x1*x1*y2 - y1*y1*y2 - y2) / (2*x2*y1 - 2*x1*y2);
+		c.y = (x1*x1*x2 + x2*y1*y1 - x1 + x2 - x1*x2*x2 - x1*y2*y2) / (2*x2*y1 - 2*x1*y2);
+		float r = length(p1 - c);
+		return Curve{p1, p2, c, r};
+	}
+	
+	static float CalculateAngles(Curve& curve1, Curve& curve2, vec2 point)
+	{
+		vec2 v1 = curve1.center - point;
+		vec2 v2 = curve2.center - point;
+		return M_PI - acos(dot(v1, v2) / (length(v1) * length(v2)));
+	}
+	
+public:
+	Curve(const vec2& p1, const vec2& p2, const vec2& c, float r) : center(c), radius(r)
+	{
+		fi1 = atan2(p1.y - center.y, p1.x - c.x);
+		fi2 = atan2(p2.y - center.y, p2.x - c.x);
+		
+		if (fi1 < 0 && fi2 > 0 && fi2 > M_PI / 2.0f)
+		{
+			fi1 += 2*M_PI;
+		}
+		else if (fi1 < 0 && fi2 > 0 && fi2 <= M_PI / 2.0f)
+		{
+			fi1 += 2*M_PI;
+			fi2 += 2*M_PI;
+		}
+		if (fi2 < 0 && fi1 > 0 && fi1 > M_PI / 2.0f)
+		{
+			fi2 += 2*M_PI;
+		}
+		else if (fi2 < 0 && fi1 > 0 && fi1 <= M_PI / 2.0f)
+		{
+			fi1 += 2*M_PI;
+			fi2 += 2*M_PI;
+		}
+	}
+	
+	void AddPoints(std::vector<vec2>& vertices, float step)
+	{
+		if (fi1 > fi2)
+			AddPointsClockvise(vertices, step);
+		else // if (c.fi1 < c.fi2)
+			AddPointsAntiClockvise(vertices, step);
+	}
+	
+	float Radius() const
+	{
+		return radius;
+	}
+	
+private:
 	float fi1;
 	float fi2;
-	float centerX;
-	float centerY;
+	vec2 center;
 	float radius;
+	
+private:
+	void AddPointsClockvise(std::vector<vec2>& vertices, float step)
+	{
+		float t = fi1;
+		while (t > fi2)
+		{
+			vertices.emplace_back(center.x + (radius * cos(t)), center.y + (radius * sin(t)));
+			t -= step;
+		}
+	}
+	
+	void AddPointsAntiClockvise(std::vector<vec2>& vertices, float step)
+	{
+		float t = fi1;
+		while (t < fi2)
+		{
+			vertices.emplace_back(center.x + (radius * cos(t)), center.y + (radius * sin(t)));
+			t += step;
+		}
+	}
 };
 
 class SiriusTriangle
 {
 public:
-	SiriusTriangle(std::vector<CurveData>& curves, float step) : m_VAO(0)
+	SiriusTriangle(std::vector<Curve>& curves, float step, const std::vector<vec2>& points) : m_VAO(0)
 	{
+		std::vector<unsigned int> sideBeginIndex;
 		for (auto& curve : curves)
 		{
-			float _step = step / curve.radius;
+			float _step = step / curve.Radius();
 			
-			ModifyAngles(curve);
-			if (curve.fi1 > curve.fi2)
-				AddPointsClockvise(curve, _step);
-			else // if (c.fi1 < c.fi2)
-				AddPointsAntiClockvise(curve, _step);
+			sideBeginIndex.push_back(allVertices.size());
+			
+			curve.AddPoints(allVertices, _step);
 		}
+		
+		printf("Oldal: %f\n", CalculateTriangleSideLength(sideBeginIndex[0], sideBeginIndex[1]));
+		printf("Oldal: %f\n", CalculateTriangleSideLength(sideBeginIndex[1], sideBeginIndex[2]));
+		printf("Oldal: %f\n", CalculateTriangleSideLength(sideBeginIndex[2], allVertices.size()));
+		
+		float angle1 = degrees(Curve::CalculateAngles(curves[0], curves[1], points[1]));
+		float angle2 = degrees(Curve::CalculateAngles(curves[1], curves[2], points[2]));
+		float angle3 = degrees(Curve::CalculateAngles(curves[2], curves[0], points[0]));
+		printf("Szog: %f\n", angle1);
+		printf("Szog: %f\n", angle2);
+		printf("Szog: %f\n", angle3);
+		printf("Szogosszeg: %f\n", (angle1 + angle2 + angle3));
 		
 		glGenVertexArrays(1, &m_VAO);
 		glBindVertexArray(m_VAO);
@@ -243,46 +335,29 @@ private:
 	unsigned int m_VAO;
 	
 private:
-	void AddPointsClockvise(CurveData& curve, float step)
+	float CalculateTriangleSideLength(unsigned int begin, unsigned int end) const
 	{
-		float t = curve.fi1;
-		while (t > curve.fi2)
+		float sideLength = 0;
+		for (unsigned int i = begin; i < end; ++i)
 		{
-			allVertices.emplace_back(curve.centerX + (curve.radius * cos(t)), curve.centerY + (curve.radius * sin(t)));
-			t -= step;
+			vec2 v1;
+			vec2 v2;
+			if (i != allVertices.size() - 1)
+			{
+				v1 = allVertices[i + 1];
+				v2 = allVertices[i];
+			}
+			else
+			{
+				v1 = allVertices[0];
+				v2 = allVertices[i];
+			}
+			
+			vec2 dz = v1 - v2;
+			float ds = (sqrt(dz.x*dz.x + dz.y*dz.y)) / (1 - v1.x*v1.x - v1.y*v1.y);
+			sideLength += ds;
 		}
-	}
-	
-	void AddPointsAntiClockvise(CurveData& curve, float step)
-	{
-		float t = curve.fi1;
-		while (t < curve.fi2)
-		{
-			allVertices.emplace_back(curve.centerX + (curve.radius * cos(t)), curve.centerY + (curve.radius * sin(t)));
-			t += step;
-		}
-	}
-	
-	static void ModifyAngles(CurveData& c)
-	{
-		if (c.fi1 < 0 && c.fi2 > 0 && c.fi2 > M_PI / 2.0f)
-		{
-			c.fi1 += 2*M_PI;
-		}
-		else if (c.fi1 < 0 && c.fi2 > 0 && c.fi2 <= M_PI / 2.0f)
-		{
-			c.fi1 += 2*M_PI;
-			c.fi2 += 2*M_PI;
-		}
-		if (c.fi2 < 0 && c.fi1 > 0 && c.fi1 > M_PI / 2.0f)
-		{
-			c.fi2 += 2*M_PI;
-		}
-		else if (c.fi2 < 0 && c.fi1 > 0 && c.fi1 <= M_PI / 2.0f)
-		{
-			c.fi1 += 2*M_PI;
-			c.fi2 += 2*M_PI;
-		}
+		return sideLength;
 	}
 };
 
@@ -358,19 +433,32 @@ void onInitialization()
 	
 	triangleShaderProgram.create(triangleVertexShader, triangleFragmentShader, "outColor");
 	
+	
+	clicks.emplace_back(0.50f, -0.50f);
+	clicks.emplace_back(-0.50f, -0.33f);
+	clicks.emplace_back(-0.17f, 0.83f);
+	std::vector<Curve> curves;
+	curves.push_back(Curve::Create(clicks[0], clicks[1]));
+	curves.push_back(Curve::Create(clicks[1], clicks[2]));
+	curves.push_back(Curve::Create(clicks[2], clicks[0]));
+	triangle = new SiriusTriangle(curves, 0.001f, clicks);
+	clicks.clear();
+	
+	
 	//glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
 	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 }
 
-// Window has become invalid: Redraw
 void onDisplay()
 {
-	glClear(GL_COLOR_BUFFER_BIT); // clear frame buffer
+	glClear(GL_COLOR_BUFFER_BIT);
 
-	mat4 MVP = { 1, 0, 0, 0,    // MVP matrix,
-		                      0, 1, 0, 0,    // row-major!
-		                      0, 0, 1, 0,
-		                      0, 0, 0, 1 };
+	mat4 MVP = {
+			1, 0, 0,0,
+			0, 1, 0, 0,
+			0, 0, 1,0,
+			0, 0, 0,1
+	};
 	
 	identityCircleShaderProgram.Use();
 	identityCircleShaderProgram.setUniform(MVP, "MVP");
@@ -404,27 +492,16 @@ void onKeyboardUp(unsigned char key, int pX, int pY) {
 }
 
 // Move mouse with key pressed
-void onMouseMotion(int pX, int pY) {	// pX, pY are the pixel coordinates of the cursor in the coordinate system of the operation system
+void onMouseMotion(int pX, int pY)
+{
 	// Convert to normalized device space
 	float cX = 2.0f * pX / windowWidth - 1;	// flip y axis
 	float cY = 1.0f - 2.0f * pY / windowHeight;
 }
 
-CurveData CreateCurve(vec2 p1, vec2 p2)
-{
-	float x1 = p1.x;
-	float y1 = p1.y;
-	float x2 = p2.x;
-	float y2 = p2.y;
-	vec2 c;
-	c.x = (x1*x1 + y1*y1 + 1 - 2*y1*( (x1*x1*x2 + x2*y1*y1 - x1 + x2 - x1*x2*x2 - x1*y2*y2) / (2*x2*y1 - 2*x1*y2) )) / (2*x1);
-	c.y = (x1*x1*x2 + x2*y1*y1 - x1 + x2 - x1*x2*x2 - x1*y2*y2) / (2*x2*y1 - 2*x1*y2);
-	float r = length(p1 - c);
-	return CurveData{atan2(y1 - c.y, x1 - c.x), atan2(y2 - c.y, x2 - c.x), c.x, c.y, r};
-}
-
 // Mouse click event
-void onMouse(int button, int state, int pX, int pY) { // pX, pY are the pixel coordinates of the cursor in the coordinate system of the operation system
+void onMouse(int button, int state, int pX, int pY)
+{
 	// Convert to normalized device space
 	float cX = 2.0f * pX / windowWidth - 1;	// flip y axis
 	float cY = 1.0f - 2.0f * pY / windowHeight;
@@ -448,13 +525,12 @@ void onMouse(int button, int state, int pX, int pY) { // pX, pY are the pixel co
 		
 		if (clicks.size() == 3)
 		{
-			std::vector<CurveData> curves;
-			
-			curves.push_back(CreateCurve(clicks[0], clicks[1]));
-			curves.push_back(CreateCurve(clicks[1], clicks[2]));
-			curves.push_back(CreateCurve(clicks[2], clicks[0]));
+			std::vector<Curve> curves;
+			curves.push_back(Curve::Create(clicks[0], clicks[1]));
+			curves.push_back(Curve::Create(clicks[1], clicks[2]));
+			curves.push_back(Curve::Create(clicks[2], clicks[0]));
 
-			triangle = new SiriusTriangle(curves, 0.01f);
+			triangle = new SiriusTriangle(curves, 0.001f, clicks);
 			
 			clicks.clear();
 		}
@@ -465,8 +541,6 @@ void onMouse(int button, int state, int pX, int pY) { // pX, pY are the pixel co
 		}
 	}
 }
-
-
 
 void onIdle()
 {
