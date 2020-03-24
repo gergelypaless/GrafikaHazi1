@@ -33,81 +33,6 @@
 //=============================================================================================
 #include "framework.h"
 
-// --------------------------------------------------------------------
-// Beadás elott kivenni:
-// --------------------------------------------------------------------
-#define ASSERT(x) if (!(x)) __builtin_trap() // csak GCC-vel tesztelve
-#define GLCall(x) GLClearError(); x; ASSERT(GLLogCall(__FUNCTION__, __FILE__, __LINE__))
-
-static void GLClearError()
-{
-	while (glGetError() != GL_NO_ERROR) ;
-}
-static bool GLLogCall(const char* function, const char* file, unsigned int line)
-{
-	if (unsigned int error = glGetError())
-	{
-		printf("[OpenGL Error] (%d): %s %s:%d\n", error, function, file, line);
-		return false;
-	}
-	return true;
-}
-// --------------------------------------------------------------------
-
-
-template <typename T>
-struct SupportedVBOLayoutTypes {};
-template <>
-struct SupportedVBOLayoutTypes<float>
-{
-	static constexpr unsigned int glType = GL_FLOAT;
-	static constexpr unsigned int normalized = GL_FALSE;
-};
-
-class LayoutElementBase
-{
-public:
-	LayoutElementBase(unsigned int count, unsigned int type) : m_Count(count), m_Type(type) { }
-	virtual ~LayoutElementBase() = default;
-	unsigned int GetCount() const { return m_Count; }
-	unsigned int GetType() const { return m_Type; }
-	virtual unsigned int GetNormalized() const = 0;
-	virtual unsigned int GetSize() const = 0;
-private:
-	unsigned int m_Count;
-	unsigned int m_Type;
-};
-
-template<typename T>
-struct LayoutElement : public LayoutElementBase
-{
-	explicit LayoutElement(unsigned int count) : LayoutElementBase(count, SupportedVBOLayoutTypes<T>::glType) {	}
-	unsigned int GetSize() const override { return GetCount() * sizeof(T); }
-	unsigned int GetNormalized() const override { return SupportedVBOLayoutTypes<T>::normalized; }
-};
-
-void UploadVertexBufferLayout(const std::vector<LayoutElementBase*>& layout)
-{
-	if (layout.empty())
-		throw "empty vector of counts";
-	
-	unsigned int stride = 0;
-	
-	// determining stride value
-	for (const auto& element : layout)
-		stride += element->GetSize();
-	
-	unsigned long offset = 0;
-	for (unsigned int i = 0; i < layout.size(); ++i)
-	{
-		glEnableVertexAttribArray(i);
-		glVertexAttribPointer(i, layout[i]->GetCount(), layout[i]->GetType(), layout[i]->GetNormalized(), stride, (void*)offset);
-		offset += layout[i]->GetSize();
-	}
-	
-	for (const auto& element : layout)
-		delete element;
-}
 
 float degrees(float radians)
 {
@@ -154,18 +79,17 @@ public:
 			allCircleVertices[i * 2 + 1] = circleVerticesY[i];
 		}
 		
-		glGenVertexArrays(1, &m_VAO);	// get 1 vao id
-		glBindVertexArray(m_VAO);		// make it active
+		glGenVertexArrays(1, &m_VAO);
+		glBindVertexArray(m_VAO);
 		
-		unsigned int vbo;		// vertex buffer object
-		glGenBuffers(1, &vbo);	// Generate 1 buffer
+		unsigned int vbo;
+		glGenBuffers(1, &vbo);
 		glBindBuffer(GL_ARRAY_BUFFER, vbo);
 		
 		glBufferData(GL_ARRAY_BUFFER, sizeof(float) * numOfVertices * 2, allCircleVertices, GL_STATIC_DRAW);
 		
-		UploadVertexBufferLayout({
-			new LayoutElement<float>(2),
-		});
+		glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 2, 0);
+		glEnableVertexAttribArray(0);
 	}
 	
 	virtual ~Circle()
@@ -209,7 +133,9 @@ public:
 	{
 		vec2 v1 = curve1.center - point;
 		vec2 v2 = curve2.center - point;
-		return M_PI - acos(dot(v1, v2) / (length(v1) * length(v2)));
+		float angle;
+		angle = M_PI - acos(dot(v1, v2) / (length(v1) * length(v2)));
+		return angle;
 	}
 	
 public:
@@ -279,6 +205,75 @@ private:
 	}
 };
 
+bool operator==(const vec2& left, const vec2& right)
+{
+	return abs(left.x - right.x) < 0.00000001f && abs(left.y - right.y) < 0.00000001f;
+}
+
+bool CrossingLine(vec2 p11, vec2 p12, vec2 p21, vec2 p22)
+{
+	if (p11 == p21 || p11 == p22 || p12 == p21 || p12 == p22)
+	{
+		return false;
+	}
+	
+	float x11 = p11.x;
+	float y11 = p11.y;
+	float x12 = p12.x;
+	float y12 = p12.y;
+	float x21 = p21.x;
+	float y21 = p21.y;
+	float x22 = p22.x;
+	float y22 = p22.y;
+	
+	float t1 = ( (x21 - x22)*(y12 - y22) + (x22 - x12)*(y21 - y22) ) / ( (x11 - x12)*(y21 - y22) - (x21 - x22)*(y11 - y12) );
+	float t2 = ( (x22 - x12)*(y11 - y12) + (y12 - y22)*(x11 - x12) ) / ( (x11 - x12)*(y21 - y22) - (x21 - x22)*(y11 - y12) );
+	return t1 > 0 && t1 < 1.0f && t2 > 0 && t2 < 1.0f;
+}
+
+bool Inside(vec2 p11, vec2 p12, std::vector<unsigned int>& indexes, const std::vector<vec2>& vertices)
+{
+	for (unsigned int i = 0; i < indexes.size() - 1; ++i)
+	{
+		vec2 p21 = vertices[indexes[i]];
+		vec2 p22 = vertices[indexes[i + 1]];
+		if (CrossingLine(p11, p12, p21, p22))
+		{
+			return false;
+		}
+	}
+	if (CrossingLine(p11, p12, vertices[indexes[0]], vertices[indexes[indexes.size() - 1]]))
+	{
+		return false;
+	}
+	else
+	{
+		vec2 p11test = (p11 + p12) / 2;
+		vec2 p12test = vec2(1.1f, p11test.y);
+		unsigned int crossCount = 0;
+		for (unsigned int i = 0; i < indexes.size() - 1; ++i)
+		{
+			vec2 p21 = vertices[indexes[i]];
+			vec2 p22 = vertices[indexes[i + 1]];
+			if (CrossingLine(p11test, p12test, p21, p22))
+			{
+				++crossCount;
+			}
+		}
+		if (CrossingLine(p11test, p12test, vertices[indexes[0]], vertices[indexes[indexes.size() - 1]]))
+			++crossCount;
+		
+		return crossCount % 2 == 1; // paratlan
+	}
+}
+
+struct Triangle
+{
+	unsigned int a;
+	unsigned int b;
+	unsigned int c;
+};
+
 class SiriusTriangle
 {
 public:
@@ -314,27 +309,66 @@ public:
 		glBindBuffer(GL_ARRAY_BUFFER, vbo);
 		glBufferData(GL_ARRAY_BUFFER, sizeof(vec2) * allVertices.size(), allVertices.data(), GL_STATIC_DRAW);
 		
-		UploadVertexBufferLayout({
-			new LayoutElement<float>(2)
-		});
+		glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 2, 0);
+		glEnableVertexAttribArray(0);
+		
+		std::vector<unsigned int> indexes;
+		indexes.reserve(allVertices.size());
+		for (unsigned int i = 0; i < allVertices.size(); ++i)
+			indexes.push_back(i);
+		EarClipping(indexes, allVertices);
 	}
 	
 	virtual ~SiriusTriangle()
 	{
 		glDeleteVertexArrays(1, &m_VAO);
+		glDeleteBuffers(1, &m_FillEBO);
 	}
 	
-	void Draw()
+	void DrawLines()
 	{
 		glBindVertexArray(m_VAO);
 		glDrawArrays(GL_LINE_LOOP, 0, allVertices.size()); // GL_LINE_STRIP ??
 	}
 	
-private:
-	std::vector<vec2> allVertices;
-	unsigned int m_VAO;
+	void DrawFill()
+	{
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_FillEBO);
+		glDrawElements(GL_TRIANGLES, indices.size() * 3, GL_UNSIGNED_INT, 0);
+	}
 	
 private:
+	std::vector<vec2> allVertices;
+	std::vector<Triangle> indices;
+	unsigned int m_VAO;
+	unsigned int m_FillEBO;
+	
+private:
+	
+	void EarClipping(std::vector<unsigned int>& indexes, const std::vector<vec2>& vertices)
+	{
+		// the algorithm
+		unsigned int i = 1;
+		while (indexes.size() > 3)
+		{
+			vec2 p11 = vertices[indexes[(i - 1) % indexes.size()]];
+			vec2 p12 = vertices[indexes[(i + 1) % indexes.size()]];
+			if (Inside(p11, p12, indexes, vertices))
+			{
+				indices.emplace_back(Triangle{indexes[(i - 1) % indexes.size()], indexes[i % indexes.size()], indexes[(i + 1) % indexes.size()]});
+				indexes.erase(indexes.begin() + (i % indexes.size()));
+				continue;
+			}
+			++i;
+		}
+		indices.emplace_back(Triangle{indexes[0], indexes[1], indexes[2]});
+		
+		glGenBuffers(1, &m_FillEBO);
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_FillEBO);
+		
+		glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(Triangle) * indices.size(), indices.data(), GL_STATIC_DRAW);
+	}
+	
 	float CalculateTriangleSideLength(unsigned int begin, unsigned int end) const
 	{
 		float sideLength = 0;
@@ -425,8 +459,8 @@ void onInitialization()
 	glViewport(0, 0, windowWidth, windowHeight);
 	
 	//glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+	glLineWidth(3);
 	
-	// identitty circle
 	identityCircle = new Circle(0, 0, 1.0f, 50, false);
 	identityCircleShaderProgram.create(circleVertexShader, circleFragmentShader, "outColor");
 	identityCircleShaderProgram.Use();
@@ -441,7 +475,7 @@ void onInitialization()
 	curves.push_back(Curve::Create(clicks[0], clicks[1]));
 	curves.push_back(Curve::Create(clicks[1], clicks[2]));
 	curves.push_back(Curve::Create(clicks[2], clicks[0]));
-	triangle = new SiriusTriangle(curves, 0.001f, clicks);
+	triangle = new SiriusTriangle(curves, 0.05f, clicks);
 	clicks.clear();
 	
 	
@@ -470,19 +504,21 @@ void onDisplay()
 		triangleShaderProgram.Use();
 		triangleShaderProgram.setUniform(MVP, "MVP");
 		triangleShaderProgram.setUniform(vec3(1.0f, 1.0f, 1.0f), "color");
-		triangle->Draw();
+		triangle->DrawLines();
+		triangleShaderProgram.setUniform(vec3(1.0f, 0.0f, 0.0f), "color");
+		triangle->DrawFill();
 	}
 	
 	glutSwapBuffers();
 }
 
-// Key of ASCII code pressed
-void onKeyboard(unsigned char key, int pX, int pY) {
+void onKeyboard(unsigned char key, int pX, int pY)
+{
 
 }
 
-// Key of ASCII code released
-void onKeyboardUp(unsigned char key, int pX, int pY) {
+void onKeyboardUp(unsigned char key, int pX, int pY)
+{
 	if (key == 27) // escape
 	{
 		delete identityCircle;
@@ -491,7 +527,6 @@ void onKeyboardUp(unsigned char key, int pX, int pY) {
 	}
 }
 
-// Move mouse with key pressed
 void onMouseMotion(int pX, int pY)
 {
 	// Convert to normalized device space
@@ -499,7 +534,6 @@ void onMouseMotion(int pX, int pY)
 	float cY = 1.0f - 2.0f * pY / windowHeight;
 }
 
-// Mouse click event
 void onMouse(int button, int state, int pX, int pY)
 {
 	// Convert to normalized device space
@@ -530,7 +564,7 @@ void onMouse(int button, int state, int pX, int pY)
 			curves.push_back(Curve::Create(clicks[1], clicks[2]));
 			curves.push_back(Curve::Create(clicks[2], clicks[0]));
 
-			triangle = new SiriusTriangle(curves, 0.001f, clicks);
+			triangle = new SiriusTriangle(curves, 0.05f, clicks);
 			
 			clicks.clear();
 		}
