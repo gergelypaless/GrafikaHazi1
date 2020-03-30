@@ -1,6 +1,4 @@
 //=============================================================================================
-// Mintaprogram: Zöld háromszög. Ervenyes 2018. osztol.
-//
 // A beadott program csak ebben a fajlban lehet, a fajl 1 byte-os ASCII karaktereket tartalmazhat, BOM kihuzando.
 // Tilos:
 // - mast "beincludolni", illetve mas konyvtarat hasznalni
@@ -37,36 +35,28 @@ float degrees(float radians)
 {
 	return radians * 180.0f / M_PI;
 }
-float radians(float degrees)
-{
-	return degrees * M_PI / 180.0f;
-}
-
-bool operator==(const vec2& left, const vec2& right)
-{
-	return abs(left.x - right.x) < 0.00000001f && abs(left.y - right.y) < 0.00000001f;
-}
 
 class Circle
 {
 public:
-	Circle(float x, float y, float radius, unsigned int numOfSides) : m_VAO(0)
+	Circle(const vec2& center, float radius, unsigned int numOfSides) : m_VAO(0)
 	{
 		/* A kor pontjainak meghatarozasat ennek a videonak a segitsegevel hataroztam meg:
 		 *      https://www.youtube.com/watch?v=YDCSKlFqpaU
 		 */
-		
+		// innentol
 		unsigned int numOfVertices = numOfSides + 2;
 		allVertices.reserve(numOfVertices);
-		allVertices.emplace_back(x, y);
+		allVertices.emplace_back(center);
 		
 		for (int i = 1; i < numOfVertices; ++i)
 		{
 			allVertices.emplace_back(
-			x + (radius * cos(i * 2.0f * M_PI / numOfSides)),
-			y + (radius * sin(i * 2.0f * M_PI / numOfSides))
+			center.x + (radius * cos(i * 2.0f * M_PI / numOfSides)),
+			center.y + (radius * sin(i * 2.0f * M_PI / numOfSides))
 			);
 		}
+		// idaig
 		
 		glGenVertexArrays(1, &m_VAO);
 		glBindVertexArray(m_VAO);
@@ -101,20 +91,22 @@ public:
 	static Curve Create(const vec2& p1, const vec2& p2)
 	{
 		vec2 center;
-		center.x = (p1.y + p2.x * p2.x * p1.y + p1.y * p2.y * p2.y - p1.x * p1.x * p2.y - p1.y * p1.y * p2.y - p2.y) / (2 * p2.x * p1.y - 2 * p1.x * p2.y);
-		center.y = (p1.x * p1.x * p2.x + p2.x * p1.y * p1.y - p1.x + p2.x - p1.x * p2.x * p2.x - p1.x * p2.y * p2.y) / (2 * p2.x * p1.y - 2 * p1.x * p2.y);
-		printf("(%f, %f)\n", center.x, center.y);
+		float denominator = (2 * p2.x * p1.y - 2 * p1.x * p2.y);
+		center.x = (p1.y + p2.x * p2.x * p1.y + p1.y * p2.y * p2.y - p1.x * p1.x * p2.y - p1.y * p1.y * p2.y - p2.y) / denominator;
+		center.y = (p1.x * p1.x * p2.x + p2.x * p1.y * p1.y - p1.x + p2.x - p1.x * p2.x * p2.x - p1.x * p2.y * p2.y) / denominator;
 		float radius = length(p1 - center);
 		return { p1, p2, center, radius };
 	}
 	
-	// TODO: not done
 	static float CalculateAngles(Curve& curve1, Curve& curve2, const vec2& point)
 	{
 		vec2 v1 = curve1.center - point;
 		vec2 v2 = curve2.center - point;
 		float angle;
-		angle = M_PI - acos(dot(v1, v2) / (length(v1) * length(v2)));
+		angle = acos(dot(v1, v2) / (length(v1) * length(v2)));
+		if (angle > M_PI / 2.0f)
+			angle = M_PI - angle;
+		
 		return angle;
 	}
 	
@@ -131,7 +123,7 @@ public:
 	{
 		if (fi1 > fi2)
 			AddPointsClockvise(vertices, step);
-		else // if (c.fi1 < c.fi2)
+		else
 			AddPointsAntiClockvise(vertices, step);
 	}
 	
@@ -173,51 +165,36 @@ private:
 	}
 };
 
-struct Line
+static bool IsCrossingLines(const vec2& p11, const vec2& p12, const vec2& p21, const vec2& p22)
 {
-	static bool IsCrossing(vec2 p11, vec2 p12, vec2 p21, vec2 p22)
-	{
-		// legalabb az egyik vegpontjuk kozos
-		if (p11 == p21 || p11 == p22 || p12 == p21 || p12 == p22)
-			return false;
-		
-		float t1 = ( (p21.x - p22.x)*(p12.y - p22.y) + (p22.x - p12.x)*(p21.y - p22.y) ) / ( (p11.x - p12.x)*(p21.y - p22.y) - (p21.x - p22.x)*(p11.y - p12.y) );
-		float t2 = ( (p22.x - p12.x)*(p11.y - p12.y) + (p12.y - p22.y)*(p11.x - p12.x) ) / ( (p11.x - p12.x)*(p21.y - p22.y) - (p21.x - p22.x)*(p11.y - p12.y) );
-		return t1 > 0 && t1 < 1.0f && t2 > 0 && t2 < 1.0f;
-	}
-	
-	vec2 p1;
-	vec2 p2;
-};
+	float denominator = (p11.x - p12.x)*(p21.y - p22.y) - (p21.x - p22.x)*(p11.y - p12.y);
+	float t1 = ( (p21.x - p22.x)*(p12.y - p22.y) + (p22.x - p12.x)*(p21.y - p22.y) ) / denominator;
+	float t2 = ( (p22.x - p12.x)*(p11.y - p12.y) + (p12.y - p22.y)*(p11.x - p12.x) ) / denominator;
+	return t1 > 0 && t1 < 1.0f && t2 > 0 && t2 < 1.0f;
+}
 
 class SiriusTriangle
 {
 public:
-	SiriusTriangle(std::vector<Curve>& curves, float step, const std::vector<vec2>& points) : m_VAO(0)
+	SiriusTriangle(std::vector<Curve>& curves, float step, const std::vector<vec2>& points) : m_VAO(0), m_FillEBO(0)
 	{
 		std::vector<unsigned int> sideBeginIndex;
+		sideBeginIndex.reserve(3);
 		for (auto& curve : curves)
 		{
-			//float _step = step / curve.Radius();
-			
 			sideBeginIndex.push_back(allVertices.size());
-			
 			curve.AddPoints(allVertices, step);
 		}
 		
-		printf("Oldal: %f\n", CalculateTriangleSideLength(sideBeginIndex[0], sideBeginIndex[1]));
-		printf("Oldal: %f\n", CalculateTriangleSideLength(sideBeginIndex[1], sideBeginIndex[2]));
-		printf("Oldal: %f\n", CalculateTriangleSideLength(sideBeginIndex[2], allVertices.size()));
+		float a = CalculateTriangleSideLength(sideBeginIndex[0], sideBeginIndex[1]);
+		float b = CalculateTriangleSideLength(sideBeginIndex[1], sideBeginIndex[2]);
+		float c = CalculateTriangleSideLength(sideBeginIndex[2], allVertices.size());
+		printf("a: %f b: %f c: %f\n", a, b, c);
 		
-		float angle1 = degrees(Curve::CalculateAngles(curves[0], curves[1], points[1]));
-		float angle2 = degrees(Curve::CalculateAngles(curves[1], curves[2], points[2]));
-		float angle3 = degrees(Curve::CalculateAngles(curves[2], curves[0], points[0]));
-		printf("Szog: %f\n", angle1);
-		printf("Szog: %f\n", angle2);
-		printf("Szog: %f\n", angle3);
-		printf("Szogosszeg: %f\n", (angle1 + angle2 + angle3));
-		
-		EarClipping();
+		float alpha = Curve::CalculateAngles(curves[0], curves[1], points[1]);
+		float beta = Curve::CalculateAngles(curves[1], curves[2], points[2]);
+		float gamma = Curve::CalculateAngles(curves[2], curves[0], points[0]);
+		printf("Alpha: %f Beta: %f Gamma: %f Angle sum: %f\n\n", degrees(alpha), degrees(beta), degrees(gamma), degrees(alpha + beta + gamma));
 		
 		glGenVertexArrays(1, &m_VAO);
 		glBindVertexArray(m_VAO);
@@ -228,6 +205,11 @@ public:
 		glBufferData(GL_ARRAY_BUFFER, sizeof(vec2) * allVertices.size(), allVertices.data(), GL_STREAM_DRAW);
 		glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 2, 0);
 		glEnableVertexAttribArray(0);
+		
+		indicesToDraw = EarClipping(allVertices);
+		glGenBuffers(1, &m_FillEBO);
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_FillEBO);
+		glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(Triangle) * indicesToDraw.size(), indicesToDraw.data(), GL_STREAM_DRAW);
 	}
 	
 	virtual ~SiriusTriangle()
@@ -239,13 +221,14 @@ public:
 	void DrawLines()
 	{
 		glBindVertexArray(m_VAO);
-		glDrawArrays(GL_LINE_LOOP, 0, allVertices.size()); // GL_LINE_STRIP ??
+		glDrawArrays(GL_LINE_LOOP, 0, allVertices.size());
 	}
 	
 	void DrawFill()
 	{
+		glBindVertexArray(m_VAO);
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_FillEBO);
-		glDrawElements(GL_TRIANGLES, indices.size() * 3, GL_UNSIGNED_INT, 0);
+		glDrawElements(GL_TRIANGLES, indicesToDraw.size() * 3, GL_UNSIGNED_INT, 0);
 	}
 	
 private:
@@ -257,84 +240,108 @@ private:
 	};
 	
 	std::vector<vec2> allVertices;
-	std::vector<Triangle> indices;
+	std::vector<Triangle> indicesToDraw;
 	unsigned int m_VAO;
 	unsigned int m_FillEBO;
 	
 private:
 	
-	void EarClipping()
+	class VerticesToIndicesConverter : public std::vector<unsigned int>
 	{
-		std::vector<unsigned int> indexes;
-		indexes.reserve(allVertices.size());
-		for (unsigned int i = 0; i < allVertices.size(); ++i)
-			indexes.push_back(i);
-		
-		// the algorithm
-		unsigned int i = 1;
-		while (indexes.size() > 3)
+	public:
+		explicit VerticesToIndicesConverter(const std::vector<vec2>& vertices) : std::vector<unsigned int>(), m_Vertices(vertices)
 		{
-			vec2 p11 = allVertices[indexes[(i - 1) % indexes.size()]];
-			vec2 p12 = allVertices[indexes[(i + 1) % indexes.size()]];
-			if (Inside(p11, p12, indexes, allVertices))
+			unsigned int verticesSize = vertices.size();
+			reserve(verticesSize);
+			for (unsigned int i = 0; i < verticesSize; i++)
+				push_back(i);
+		}
+		
+		const vec2& operator[](long idx) const
+		{
+			unsigned long siz = size();
+			return m_Vertices[std::vector<unsigned int>::operator[]((idx + siz) % siz)];
+		}
+		
+		unsigned int GetIndex(long idx) const
+		{
+			unsigned long siz = size();
+			return std::vector<unsigned int>::operator[]((idx + siz) % siz);
+		}
+		
+	private:
+		const std::vector<vec2>& m_Vertices;
+	};
+	
+	static std::vector<Triangle> EarClipping(const std::vector<vec2>& vertices)
+	{
+		std::vector<Triangle> indices;
+		VerticesToIndicesConverter polygonVertices(vertices);
+		
+		int i = 0;
+		while (polygonVertices.size() > 3 && i < polygonVertices.size())
+		{
+			if (IsEar(polygonVertices, i))
 			{
-				indices.emplace_back(Triangle{indexes[(i - 1) % indexes.size()], indexes[i % indexes.size()], indexes[(i + 1) % indexes.size()]});
-				indexes.erase(indexes.begin() + (i % indexes.size()));
-				continue;
+				indices.push_back(Triangle{polygonVertices.GetIndex(i - 1), polygonVertices.GetIndex(i), polygonVertices.GetIndex(i + 1)});
+				polygonVertices.erase(polygonVertices.begin() + i);
+				i = 0;
 			}
 			++i;
 		}
-		indices.emplace_back(Triangle{indexes[0], indexes[1], indexes[2]});
-		
-		glGenBuffers(1, &m_FillEBO);
-		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_FillEBO);
-		glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(Triangle) * indices.size(), indices.data(), GL_STREAM_DRAW);
+		indices.push_back(Triangle{polygonVertices.GetIndex(0), polygonVertices.GetIndex(1), polygonVertices.GetIndex(2)});
+		return indices;
 	}
 	
-	bool Inside(vec2 p11, vec2 p12, std::vector<unsigned int>& indexes, const std::vector<vec2>& vertices)
+	static bool IsEar(const VerticesToIndicesConverter& vertices, int n)
 	{
-		for (unsigned int i = 0; i < indexes.size() - 1; ++i)
+		return IsInside(vertices, n) && !IsEarCrossingAnotherSide(vertices, n);
+	}
+	
+	static bool IsEarCrossingAnotherSide(const VerticesToIndicesConverter& vertices, int n)
+	{
+		int verticesSize = vertices.size();
+		int prev = (verticesSize + (n - 1)) % verticesSize;
+		int next = (n + 1) % verticesSize;
+		
+		const vec2& p11 = vertices[prev];
+		const vec2& p12 = vertices[next];
+		for (int i = 0; i < verticesSize; ++i)
 		{
-			vec2 p21 = vertices[indexes[i]];
-			vec2 p22 = vertices[indexes[i + 1]];
-			if (Line::IsCrossing(p11, p12, p21, p22))
-			{
-				return false;
-			}
-		}
-		if (Line::IsCrossing(p11, p12, vertices[indexes[0]], vertices[indexes[indexes.size() - 1]]))
-		{
-			return false;
-		}
-		else
-		{
-			vec2 p11test = (p11 + p12) / 2;
-			vec2 p12test = vec2(1.1f, p11test.y);
-			unsigned int crossCount = 0;
-			for (unsigned int i = 0; i < indexes.size() - 1; ++i)
-			{
-				vec2 p21 = vertices[indexes[i]];
-				vec2 p22 = vertices[indexes[i + 1]];
-				if (Line::IsCrossing(p11test, p12test, p21, p22))
-				{
-					++crossCount;
-				}
-			}
-			if (Line::IsCrossing(p11test, p12test, vertices[indexes[0]], vertices[indexes[indexes.size() - 1]]))
-				++crossCount;
+			if (n == i || n == i - 1 || prev == i || prev == i - 1 || next == i || next == i - 1)
+				continue;
 			
-			return crossCount % 2 == 1; // paratlan
+			const vec2& p21 = vertices[i - 1];
+			const vec2& p22 = vertices[i];
+			if (IsCrossingLines(p11, p12, p21, p22))
+				return true;
 		}
+		return false;
+	}
+	
+	static bool IsInside(const VerticesToIndicesConverter& vertices, int n)
+	{
+		unsigned int crossCount = 0;
+		vec2 testLine_p1 = (vertices[n - 1] + vertices[n + 1]) / 2;
+		vec2 testLine_p2 = vec2(1.1f, testLine_p1.y);
+		for (int i = 0; i < vertices.size(); ++i)
+		{
+			if (IsCrossingLines(testLine_p1, testLine_p2, vertices[i - 1], vertices[i]))
+				++crossCount;
+		}
+		return crossCount % 2 == 1;
 	}
 	
 	float CalculateTriangleSideLength(unsigned int begin, unsigned int end) const
 	{
+		unsigned int verticesSize = allVertices.size();
+		
 		float sideLength = 0;
 		for (unsigned int i = begin; i < end; ++i)
 		{
 			vec2 v1;
 			vec2 v2;
-			if (i != allVertices.size() - 1)
+			if (i != verticesSize - 1)
 			{
 				v1 = allVertices[i + 1];
 				v2 = allVertices[i];
@@ -354,31 +361,28 @@ private:
 };
 
 const char * const vertexShaderSource = R"(
-	#version 330				// Shader 3.3
-	precision highp float;		// normal floats, makes no difference on desktop computers
+	#version 330
+	precision highp float;
 
-	layout(location = 0) in vec2 aPos;	// Varying input: vp = vertex position is expected in attrib array 0
-
-	uniform mat4 MVP;			// uniform variable, the Model-View-Projection transformation matrix
+	layout(location = 0) in vec2 aPos;
 
 	void main() {
-		gl_Position = vec4(aPos.xy, 0.0f, 1.0f) * MVP;		// transform vp from modeling space to normalized device space
+		gl_Position = vec4(aPos.xy, 0.0f, 1.0f);
 	}
 )";
 
 const char * const fragmentShaderSource = R"(
-	#version 330			// Shader 3.3
-	precision highp float;	// normal floats, makes no difference on desktop computers
+	#version 330
+	precision highp float;
 	
-	out vec4 outColor;		// computed color of the current pixel
+	out vec4 outColor;
 
-	uniform vec3 color;		// uniform variable, the color of the primitive
+	uniform vec3 color;
 
 	void main() {
-		outColor = vec4(color.xyz, 1.0f);	// computed color is the color of the primitive
+		outColor = vec4(color.xyz, 1.0f);
 	}
 )";
-
 
 GPUProgram shaderProgram;
 Circle* identityCircle;
@@ -389,24 +393,9 @@ void onInitialization()
 {
 	glViewport(0, 0, windowWidth, windowHeight);
 	
-	//glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-	
-	identityCircle = new Circle(0.0f, 0.0f, 1.0f, 50);
+	identityCircle = new Circle(vec2(0.0f, 0.0f), 1.0f, 50);
 	shaderProgram.create(vertexShaderSource, fragmentShaderSource, "outColor");
 	shaderProgram.Use();
-	
-	/*clicks.emplace_back(0.50f, -0.50f);
-	clicks.emplace_back(-0.50f, -0.33f);
-	clicks.emplace_back(-0.17f, 0.83f);*/
-	/*clicks.emplace_back(-0.74, -0.60);
-	clicks.emplace_back(-0.68, -0.66);
-	clicks.emplace_back(0.75, -0.53);
-	std::vector<Curve> curves;
-	curves.push_back(Curve::Create(clicks[0], clicks[1]));
-	curves.push_back(Curve::Create(clicks[1], clicks[2]));
-	curves.push_back(Curve::Create(clicks[2], clicks[0]));
-	triangle = new SiriusTriangle(curves, 0.01f, clicks);
-	clicks.clear();*/
 	
 	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 }
@@ -414,25 +403,17 @@ void onInitialization()
 void onDisplay()
 {
 	glClear(GL_COLOR_BUFFER_BIT);
-
-	mat4 MVP = {
-			1, 0, 0,0,
-			0, 1, 0, 0,
-			0, 0, 1,0,
-			0, 0, 0,1
-	};
 	
 	shaderProgram.Use();
-	shaderProgram.setUniform(MVP, "MVP");
 	shaderProgram.setUniform(vec3(0.18f, 0.18f, 0.18f), "color");
 	identityCircle->Draw();
 	
 	if (triangle != nullptr)
 	{
-		shaderProgram.setUniform(vec3(1.0f, 1.0f, 1.0f), "color");
-		triangle->DrawLines();
 		shaderProgram.setUniform(vec3(1.0f, 0.0f, 0.0f), "color");
 		triangle->DrawFill();
+		shaderProgram.setUniform(vec3(1.0f, 1.0f, 1.0f), "color");
+		triangle->DrawLines();
 	}
 	
 	glutSwapBuffers();
@@ -447,18 +428,6 @@ void onMouse(int button, int state, int pX, int pY)
 	// Convert to normalized device space
 	float cX = 2.0f * pX / windowWidth - 1;	// flip y axis
 	float cY = 1.0f - 2.0f * pY / windowHeight;
-
-	const char * buttonStat = nullptr;
-	switch (state) {
-	case GLUT_DOWN: buttonStat = "pressed"; break;
-	case GLUT_UP:   buttonStat = "released"; break;
-	}
-
-	switch (button) {
-	case GLUT_LEFT_BUTTON:   printf("Left button %s at (%3.2f, %3.2f)\n", buttonStat, cX, cY);   break;
-	case GLUT_MIDDLE_BUTTON: printf("Middle button %s at (%3.2f, %3.2f)\n", buttonStat, cX, cY); break;
-	case GLUT_RIGHT_BUTTON:  printf("Right button %s at (%3.2f, %3.2f)\n", buttonStat, cX, cY);  break;
-	}
 	
 	if (state == GLUT_UP && button == GLUT_LEFT_BUTTON)
 	{
@@ -466,11 +435,12 @@ void onMouse(int button, int state, int pX, int pY)
 		if (clicks.size() == 3)
 		{
 			std::vector<Curve> curves;
+			curves.reserve(3);
 			curves.push_back(Curve::Create(clicks[0], clicks[1]));
 			curves.push_back(Curve::Create(clicks[1], clicks[2]));
 			curves.push_back(Curve::Create(clicks[2], clicks[0]));
 
-			triangle = new SiriusTriangle(curves, 0.01f, clicks);
+			triangle = new SiriusTriangle(curves, 0.008f, clicks);
 			
 			clicks.clear();
 		}
@@ -483,7 +453,4 @@ void onMouse(int button, int state, int pX, int pY)
 	}
 }
 
-void onIdle()
-{
-	long time = glutGet(GLUT_ELAPSED_TIME); // elapsed time since the start of the program
-}
+void onIdle() {}
