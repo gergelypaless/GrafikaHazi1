@@ -95,19 +95,54 @@ public:
 		center.x = (p1.y + p2.x * p2.x * p1.y + p1.y * p2.y * p2.y - p1.x * p1.x * p2.y - p1.y * p1.y * p2.y - p2.y) / denominator;
 		center.y = (p1.x * p1.x * p2.x + p2.x * p1.y * p1.y - p1.x + p2.x - p1.x * p2.x * p2.x - p1.x * p2.y * p2.y) / denominator;
 		float radius = length(p1 - center);
-		return { p1, p2, center, radius };
+		return Curve{ p1, p2, center, radius };
 	}
 	
-	static float CalculateAngles(Curve& curve1, Curve& curve2, const vec2& point)
+	static std::vector<float> CalculateAngles(const std::vector<Curve>& curves, const std::vector<vec2>& points)
 	{
-		vec2 v1 = curve1.center - point;
-		vec2 v2 = curve2.center - point;
-		float angle;
-		angle = acos(dot(v1, v2) / (length(v1) * length(v2)));
-		if (angle > M_PI / 2.0f)
-			angle = M_PI - angle;
+		struct Line
+		{
+			vec2 n;
+			vec2 p0;
+		};
 		
-		return angle;
+		auto Angle = [](const vec2& v1, const vec2& v2){
+			return acos(dot(v1, v2) / (length(v1) * length(v2)));
+		};
+		auto IntersectionPoint = [](const Line& l1, const Line& l2){
+			vec2 point;
+			float denominator = (l1.n.x * l2.n.y - l1.n.y * l2.n.x);
+			point.x = (l1.n.x * l2.n.y * l1.p0.x + l1.n.y * l2.n.y * l1.p0.y - l1.n.y * l2.n.x * l2.p0.x - l1.n.y * l2.n.y * l2.p0.y) / denominator;
+			point.y = (l1.n.x * l2.n.x * l2.p0.x + l1.n.x * l2.n.y * l2.p0.y - l1.n.x * l2.n.x * l1.p0.x - l1.n.y * l2.n.x * l1.p0.y) / denominator;
+			return point;
+		};
+		
+		unsigned int count = curves.size();
+		auto at = [=](int idx){
+			return (idx + count) % count;
+		};
+		
+		std::vector<float> angles;
+		for (int i = 0; i < count; ++i)
+		{
+			vec2 point;
+			
+			vec2 intersectionPoint1 = IntersectionPoint(
+					Line{curves[at(i - 1)].center - points[at(i - 1)], points[at(i - 1)]},
+			        Line{curves[at(i - 1)].center - points[at(i)], points[at(i)]}
+					);
+			
+			vec2 intersectionPoint2 = IntersectionPoint(
+					Line{curves[at(i)].center - points[at(i)], points[at(i)]},
+					Line{curves[at(i)].center - points[at(i + 1)], points[at(i + 1)]}
+					);
+			
+			vec2 v1 = intersectionPoint1 - points[i];
+			vec2 v2 = intersectionPoint2 - points[i];
+			
+			angles.push_back(Angle(v1, v2));
+		}
+		return angles;
 	}
 	
 public:
@@ -122,9 +157,9 @@ public:
 	void AddPoints(std::vector<vec2>& vertices, float step)
 	{
 		if (fi1 > fi2)
-			AddPointsClockvise(vertices, step);
+			AddPointsClockwise(vertices, step);
 		else
-			AddPointsAntiClockvise(vertices, step);
+			AddPointsCounterClockwise(vertices, step);
 	}
 	
 private:
@@ -134,7 +169,7 @@ private:
 	float radius;
 	
 private:
-	void AddPointsClockvise(std::vector<vec2>& vertices, float step)
+	void AddPointsClockwise(std::vector<vec2>& vertices, float step)
 	{
 		float t = fi1;
 		while (t > fi2)
@@ -144,7 +179,7 @@ private:
 		}
 	}
 	
-	void AddPointsAntiClockvise(std::vector<vec2>& vertices, float step)
+	void AddPointsCounterClockwise(std::vector<vec2>& vertices, float step)
 	{
 		float t = fi1;
 		while (t < fi2)
@@ -170,7 +205,7 @@ static bool IsCrossingLines(const vec2& p11, const vec2& p12, const vec2& p21, c
 	float denominator = (p11.x - p12.x)*(p21.y - p22.y) - (p21.x - p22.x)*(p11.y - p12.y);
 	float t1 = ( (p21.x - p22.x)*(p12.y - p22.y) + (p22.x - p12.x)*(p21.y - p22.y) ) / denominator;
 	float t2 = ( (p22.x - p12.x)*(p11.y - p12.y) + (p12.y - p22.y)*(p11.x - p12.x) ) / denominator;
-	return t1 > 0 && t1 < 1.0f && t2 > 0 && t2 < 1.0f;
+	return t1 > 0.00000001 && t1 < 0.99999999f && t2 > 0.00000001 && t2 < 0.99999999f;
 }
 
 class SiriusTriangle
@@ -191,10 +226,9 @@ public:
 		float c = CalculateTriangleSideLength(sideBeginIndex[2], allVertices.size());
 		printf("a: %f b: %f c: %f\n", a, b, c);
 		
-		float alpha = Curve::CalculateAngles(curves[0], curves[1], points[1]);
-		float beta = Curve::CalculateAngles(curves[1], curves[2], points[2]);
-		float gamma = Curve::CalculateAngles(curves[2], curves[0], points[0]);
-		printf("Alpha: %f Beta: %f Gamma: %f Angle sum: %f\n\n", degrees(alpha), degrees(beta), degrees(gamma), degrees(alpha + beta + gamma));
+		std::vector<float> angles = Curve::CalculateAngles(curves, points);
+		printf("Alpha: %f Beta: %f Gamma: %f Angle sum: %f\n\n",
+				degrees(angles[0]), degrees(angles[1]), degrees(angles[2]), degrees(angles[0] + angles[1] + angles[2]));
 		
 		glGenVertexArrays(1, &m_VAO);
 		glBindVertexArray(m_VAO);
