@@ -1,34 +1,16 @@
-//=============================================================================================
-// A beadott program csak ebben a fajlban lehet, a fajl 1 byte-os ASCII karaktereket tartalmazhat, BOM kihuzando.
-// Tilos:
-// - mast "beincludolni", illetve mas konyvtarat hasznalni
-// - faljmuveleteket vegezni a printf-et kiveve
-// - Mashonnan atvett programresszleteket forrasmegjeloles nelkul felhasznalni es
-// - felesleges programsorokat a beadott programban hagyni!!!!!!! 
-// - felesleges kommenteket a beadott programba irni a forrasmegjelolest kommentjeit kiveve
-// ---------------------------------------------------------------------------------------------
-// A feladatot ANSI C++ nyelvu forditoprogrammal ellenorizzuk, a Visual Studio-hoz kepesti elteresekrol
-// es a leggyakoribb hibakrol (pl. ideiglenes objektumot nem lehet referencia tipusnak ertekul adni)
-// a hazibeado portal ad egy osszefoglalot.
-// ---------------------------------------------------------------------------------------------
-// A feladatmegoldasokban csak olyan OpenGL fuggvenyek hasznalhatok, amelyek az oran a feladatkiadasig elhangzottak 
-// A keretben nem szereplo GLUT fuggvenyek tiltottak.
-//
-// NYILATKOZAT
-// ---------------------------------------------------------------------------------------------
-// Nev    : Paless Gergely
-// Neptun : Z7CHHP
-// ---------------------------------------------------------------------------------------------
-// ezennel kijelentem, hogy a feladatot magam keszitettem, es ha barmilyen segitseget igenybe vettem vagy
-// mas szellemi termeket felhasznaltam, akkor a forrast es az atvett reszt kommentekben egyertelmuen jeloltem.
-// A forrasmegjeloles kotelme vonatkozik az eloadas foliakat es a targy oktatoi, illetve a
-// grafhazi doktor tanacsait kiveve barmilyen csatornan (szoban, irasban, Interneten, stb.) erkezo minden egyeb
-// informaciora (keplet, program, algoritmus, stb.). Kijelentem, hogy a forrasmegjelolessel atvett reszeket is ertem,
-// azok helyessegere matematikai bizonyitast tudok adni. Tisztaban vagyok azzal, hogy az atvett reszek nem szamitanak
-// a sajat kontribucioba, igy a feladat elfogadasarol a tobbi resz mennyisege es minosege alapjan szuletik dontes.
-// Tudomasul veszem, hogy a forrasmegjeloles kotelmenek megsertese eseten a hazifeladatra adhato pontokat
-// negativ elojellel szamoljak el es ezzel parhuzamosan eljaras is indul velem szemben.
-//=============================================================================================
+/* Feladat:
+ * A Szíriusz csillagképből érkező földönkívülieknek megtetszett a Word, Powerpoint, stb. 2D-s rajzoló programja, de azt közvetlenül nem használhatják,
+ * ugyanis ők más geometriával dolgoznak. Önt bízták meg a program adaptálásával arra az egyszerű esetre, amikor három pontra egy háromszöget kell illeszteni.
+ * Szerencsére adtak egy szótárat, ami a szíriuszi geometriai fogalmakat megfelelteti az általunk használt euklideszi geometriai fogalmaknak: A Szíriusz sík
+ * az euklideszi sík egység sugarú köre, amit alapkörnek neveznek.
+ * Miközben az euklideszi síkot a komplex számokkal lehet számszerűsíteni, a Szíriusz síkot az egységnél kisebb abszolút értékű komplex számokkal.
+ * Amíg az euklideszi sík metrikája |dz|=sqrt(dx^2+dy^2) a Szíriusz síké |dz|/(1-|z|^2). A Szíriusz egyenes egy olyan euklideszi körív, amely az alapkörre merőlegesen érkezik.
+ * A feladat három egér klikk után a három pont által definiált háromszöget a háttértől eltérő színnel kitölteni, az éleket ezektől eltérő színnel felrajzolni,
+ * és a szabványos kimenetre a három szögeit és oldalainak hosszát kiírni.
+ */
+
+// This program has O(1) memory leak
+
 #include "framework.h"
 
 float degrees(float radians)
@@ -36,27 +18,26 @@ float degrees(float radians)
 	return radians * 180.0f / M_PI;
 }
 
+// responsible for the identity circle
 class Circle
 {
 public:
 	Circle(const vec2& center, float radius, unsigned int numOfSides) : m_VAO(0)
 	{
-		/* A kor pontjainak meghatarozasat ennek a videonak a segitsegevel hataroztam meg:
-		 *      https://www.youtube.com/watch?v=YDCSKlFqpaU
-		 */
-		// innentol
 		unsigned int numOfVertices = numOfSides + 2;
 		allVertices.reserve(numOfVertices);
+		
+		// center is on the 0. index
 		allVertices.emplace_back(center);
 		
 		for (int i = 1; i < numOfVertices; ++i)
 		{
 			allVertices.emplace_back(
+				// circle's equation
 			center.x + (radius * cos(i * 2.0f * M_PI / numOfSides)),
 			center.y + (radius * sin(i * 2.0f * M_PI / numOfSides))
 			);
 		}
-		// idaig
 		
 		glGenVertexArrays(1, &m_VAO);
 		glBindVertexArray(m_VAO);
@@ -81,43 +62,64 @@ public:
 	}
 	
 private:
-	std::vector<vec2> allVertices;
+	std::vector<vec2> allVertices; // stores the points on the circle
 	unsigned int m_VAO;
 };
 
 class Curve
 {
 public:
+	// p1,p2 are one of the 3 clicks
 	static Curve Create(const vec2& p1, const vec2& p2)
 	{
 		vec2 center;
-		float denominator = (2 * p2.x * p1.y - 2 * p1.x * p2.y);
+		
+		/* calculating the center point
+		 * solve:
+		 * r^2 + 1 = |c|^2
+		 * |p1 - c| = r -> |p1 - c|^2 = r^2
+		 * Ax + By = Ax0 + By0
+		 * where c(x, y) = ?; n(A, B) = p1 - p2; p0(x0, y0) = (p1 + p2) / 2
+		 */
+		float denominator = (2 * p2.x * p1.y - 2 * p1.x * p2.y); // both center.x and center.y has the same denominator
 		center.x = (p1.y + p2.x * p2.x * p1.y + p1.y * p2.y * p2.y - p1.x * p1.x * p2.y - p1.y * p1.y * p2.y - p2.y) / denominator;
 		center.y = (p1.x * p1.x * p2.x + p2.x * p1.y * p1.y - p1.x + p2.x - p1.x * p2.x * p2.x - p1.x * p2.y * p2.y) / denominator;
+		
+		// calculation the radius
 		float radius = length(p1 - center);
+		
 		return Curve{ p1, p2, center, radius };
 	}
 	
+	// calculate the 3 angles of the sirius triangle
+	// curves: the 3 curve in order -> the 3 sides if the sirius triangle; points: the 3 clicks in order
 	static std::vector<float> CalculateAngles(const std::vector<Curve>& curves, const std::vector<vec2>& points)
 	{
+		// represent a line with a normal vector and a p0 point
 		struct Line
 		{
 			vec2 n;
 			vec2 p0;
 		};
 		
+		// calculate angle between two 2D vectors
 		auto Angle = [](const vec2& v1, const vec2& v2){
 			return acos(dot(v1, v2) / (length(v1) * length(v2)));
 		};
+		// does l1 and l2 have an intersection point? If yes return the point
 		auto IntersectionPoint = [](const Line& l1, const Line& l2){
 			vec2 point;
-			float denominator = (l1.n.x * l2.n.y - l1.n.y * l2.n.x);
+			// calculating intersection point
+			float denominator = (l1.n.x * l2.n.y - l1.n.y * l2.n.x); // both point.x and point.y has the same denominator
 			point.x = (l1.n.x * l2.n.y * l1.p0.x + l1.n.y * l2.n.y * l1.p0.y - l1.n.y * l2.n.x * l2.p0.x - l1.n.y * l2.n.y * l2.p0.y) / denominator;
 			point.y = (l1.n.x * l2.n.x * l2.p0.x + l1.n.x * l2.n.y * l2.p0.y - l1.n.x * l2.n.x * l1.p0.x - l1.n.y * l2.n.x * l1.p0.y) / denominator;
 			return point;
 		};
 		
+		// how many sides do we have? (we always have 3)
 		unsigned int count = curves.size();
+		
+		// helper for indexing
 		auto at = [=](int idx){
 			return (idx + count) % count;
 		};
@@ -127,6 +129,7 @@ public:
 		{
 			vec2 point;
 			
+			// how it works: https://www.geogebra.org/m/ctp2nkfu
 			vec2 intersectionPoint1 = IntersectionPoint(
 					Line{curves[at(i - 1)].center - points[at(i - 1)], points[at(i - 1)]},
 			        Line{curves[at(i - 1)].center - points[at(i)], points[at(i)]}
@@ -146,8 +149,10 @@ public:
 	}
 	
 public:
+	// we can create a curve with 2 points, a center point and a radius. The curve is between the p1 and p2 (we always need the smaller curve)
 	Curve(const vec2& p1, const vec2& p2, const vec2& c, float r) : center(c), radius(r)
 	{
+		// angle of p1 and p2. atan2 has an interval of (-pi, pi)
 		fi1 = atan2(p1.y - center.y, p1.x - c.x);
 		fi2 = atan2(p2.y - center.y, p2.x - c.x);
 		
@@ -156,6 +161,7 @@ public:
 	
 	void AddPoints(std::vector<vec2>& vertices, float step)
 	{
+		// determining how we have to add the points
 		if (fi1 > fi2)
 			AddPointsClockwise(vertices, step);
 		else
@@ -191,8 +197,11 @@ private:
 	
 	void DetermineSmallerAngle()
 	{
+		// making sure we have 2 positive angle
 		fi1 += 2*M_PI;
 		fi2 += 2*M_PI;
+		// if the difference of fi1 and fi2 is bigger than M_PI, then we have the bigger curve right now (we need the smaller curve)
+		// if we add 2*pi to the smaller angle we get the smaller curve
 		if (fi1 - fi2 > M_PI)
 			fi2 += 2*M_PI;
 		if (fi2 - fi1 > M_PI)
@@ -200,19 +209,24 @@ private:
 	}
 };
 
+// line1(p11, 12), line2(p21, p22)
 static bool IsCrossingLines(const vec2& p11, const vec2& p12, const vec2& p21, const vec2& p22)
 {
 	float denominator = (p11.x - p12.x)*(p21.y - p22.y) - (p21.x - p22.x)*(p11.y - p12.y);
 	float t1 = ( (p21.x - p22.x)*(p12.y - p22.y) + (p22.x - p12.x)*(p21.y - p22.y) ) / denominator;
 	float t2 = ( (p22.x - p12.x)*(p11.y - p12.y) + (p12.y - p22.y)*(p11.x - p12.x) ) / denominator;
+	// if 0 <= t1 <= 1 and 0 <= t2 <= 1 then we have an intersection point
 	return t1 > 0.00000001 && t1 < 0.99999999f && t2 > 0.00000001 && t2 < 0.99999999f;
 }
 
 class SiriusTriangle
 {
 public:
+	// we can create a sirius triangle with 3 sides (curves) and the 3 clicks on the screen, which means the 3 point of the triangle
+	// step controls the amount of points on the triangle
 	SiriusTriangle(std::vector<Curve>& curves, float step, const std::vector<vec2>& points) : m_VAO(0), m_FillEBO(0)
 	{
+		// stroses where the side points start
 		std::vector<unsigned int> sideBeginIndex;
 		sideBeginIndex.reserve(3);
 		for (auto& curve : curves)
@@ -273,13 +287,14 @@ private:
 		unsigned int c;
 	};
 	
-	std::vector<vec2> allVertices;
-	std::vector<Triangle> indicesToDraw;
+	std::vector<vec2> allVertices; // stores the points of the polygon
+	std::vector<Triangle> indicesToDraw; // stores the indexes of the fill
 	unsigned int m_VAO;
 	unsigned int m_FillEBO;
 	
 private:
 	
+	// let us access vertices via indices
 	class VerticesToIndicesConverter : public std::vector<unsigned int>
 	{
 	public:
@@ -317,24 +332,31 @@ private:
 		{
 			if (IsEar(polygonVertices, i))
 			{
+				// we found an ear, adding indices to the vector<>
 				indices.push_back(Triangle{polygonVertices.GetIndex(i - 1), polygonVertices.GetIndex(i), polygonVertices.GetIndex(i + 1)});
+				// removing the ear vertex
 				polygonVertices.erase(polygonVertices.begin() + i);
+				// start from the beginning
 				i = 0;
+				continue;
 			}
 			++i;
 		}
+		// adding the last triangle to the indices
 		indices.push_back(Triangle{polygonVertices.GetIndex(0), polygonVertices.GetIndex(1), polygonVertices.GetIndex(2)});
 		return indices;
 	}
 	
 	static bool IsEar(const VerticesToIndicesConverter& vertices, int n)
 	{
+		// ear, if the diagonal is inside the polygon and is not cross any other side
 		return IsInside(vertices, n) && !IsEarCrossingAnotherSide(vertices, n);
 	}
 	
 	static bool IsEarCrossingAnotherSide(const VerticesToIndicesConverter& vertices, int n)
 	{
 		int verticesSize = vertices.size();
+		// prev and next are the indices of the 2 endpoints of the diagonal
 		int prev = (verticesSize + (n - 1)) % verticesSize;
 		int next = (n + 1) % verticesSize;
 		
@@ -342,9 +364,11 @@ private:
 		const vec2& p12 = vertices[next];
 		for (int i = 0; i < verticesSize; ++i)
 		{
+			// skipping the vertices of other sides of the ear
 			if (n == i || n == i - 1 || prev == i || prev == i - 1 || next == i || next == i - 1)
 				continue;
 			
+			// a side of the polygon: (p21, p22)
 			const vec2& p21 = vertices[i - 1];
 			const vec2& p22 = vertices[i];
 			if (IsCrossingLines(p11, p12, p21, p22))
@@ -356,6 +380,7 @@ private:
 	static bool IsInside(const VerticesToIndicesConverter& vertices, int n)
 	{
 		unsigned int crossCount = 0;
+		// testline form a point on the diagonal to infinity (untill 1.1)
 		vec2 testLine_p1 = (vertices[n - 1] + vertices[n + 1]) / 2;
 		vec2 testLine_p2 = vec2(1.1f, testLine_p1.y);
 		for (int i = 0; i < vertices.size(); ++i)
@@ -363,6 +388,7 @@ private:
 			if (IsCrossingLines(testLine_p1, testLine_p2, vertices[i - 1], vertices[i]))
 				++crossCount;
 		}
+		// if crosscount is odd then the diagonal was inside
 		return crossCount % 2 == 1;
 	}
 	
@@ -427,7 +453,10 @@ void onInitialization()
 {
 	glViewport(0, 0, windowWidth, windowHeight);
 	
+	// creating identity circle
 	identityCircle = new Circle(vec2(0.0f, 0.0f), 1.0f, 50);
+	
+	// creating shader
 	shaderProgram.create(vertexShaderSource, fragmentShaderSource, "outColor");
 	shaderProgram.Use();
 	
@@ -470,10 +499,10 @@ void onMouse(int button, int state, int pX, int pY)
 		{
 			std::vector<Curve> curves;
 			curves.reserve(3);
-			curves.push_back(Curve::Create(clicks[0], clicks[1]));
-			curves.push_back(Curve::Create(clicks[1], clicks[2]));
-			curves.push_back(Curve::Create(clicks[2], clicks[0]));
-
+			curves.push_back(Curve::Create(clicks[0], clicks[1])); // curve between p1 and p2
+			curves.push_back(Curve::Create(clicks[1], clicks[2])); // curve between p2 and p3
+			curves.push_back(Curve::Create(clicks[2], clicks[0])); // curve between p3 and p1
+			
 			triangle = new SiriusTriangle(curves, 0.008f, clicks);
 			
 			clicks.clear();
